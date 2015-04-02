@@ -42,12 +42,12 @@ env:
   global:
     # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
     #   via the "travis encrypt" command using the project repo's public key
-    - secure: "dCRCeC2dsmMGjofFgCVaiIqQQ066iMU5IY5TvEHTY2mrTq7ORlo02qnnSNQYi8jPVYWaYJ9a3K1HkoD79daYP6DAUmD9/tL62FLORemdP7/AcgYC70gPRvvUwzVZUYLN4laewV5ivymeuCqnJMH5eZKwJOAPKJo1p9QgeUMIQ3M="
+    - secure: "Tjur2fEgZFuZIUyi5i7vs20Tw0fy586pcXjS9tyytIULgS0FHWjMi6fxeI9YrSmFSNhYrEVEJonXZvzJYgHaIJGytxtNcuZQ+nXrjw2bpOAdKk56X2ZLbC8pGPfBoVJl3Ebkm1xb9G887tW9pQLeDgIW5sb0YTNpM/dIgwWjr48="
 
 addons:
   coverity_scan:
     project:
-      name: "puppetlabs/cfacter"
+      name: "puppetlabs/facter"
       description: "Build submitted via Travis CI"
     notification_email: michael.smith@puppetlabs.com
     build_command_prepend: "$HOME/bin/cmake -DCMAKE_BUILD_TYPE=Debug .; make clean"
