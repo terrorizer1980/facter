@@ -1,0 +1,21 @@
+var searchData=
+[
+  ['omni',['omni',['../structfacter_1_1facts_1_1os.html#aeef20e44d53f0437d983b9e6381d390f',1,'facter::facts::os']]],
+  ['open_5findiana',['open_indiana',['../structfacter_1_1facts_1_1os.html#a04d03cb8ced31e54e68b6816dc326b5e',1,'facter::facts::os']]],
+  ['open_5fsuse',['open_suse',['../structfacter_1_1facts_1_1os.html#a8d9898aecc9f400436530762ea381eb5',1,'facter::facts::os']]],
+  ['openvz_5fhn',['openvz_hn',['../structfacter_1_1facts_1_1vm.html#af79b79add83563fc724d17bc0831794c',1,'facter::facts::vm']]],
+  ['openvz_5fve',['openvz_ve',['../structfacter_1_1facts_1_1vm.html#a6b577c6ec020d1f62b6c6fa5fd3916b1',1,'facter::facts::vm']]],
+  ['openwrt',['openwrt',['../structfacter_1_1facts_1_1os.html#a18fe10f51359a00e19c56f07dbe12561',1,'facter::facts::os::openwrt()'],['../structfacter_1_1facts_1_1linux_1_1release__file.html#abb8ee50676c0b9e6f0d4cfd0c3b02562',1,'facter::facts::linux::release_file::openwrt()']]],
+  ['openwrt_5fversion',['openwrt_version',['../structfacter_1_1facts_1_1linux_1_1release__file.html#a1d6057d78eaaa261d5cf20025cd16019',1,'facter::facts::linux::release_file']]],
+  ['operating_5fsystem',['operating_system',['../structfacter_1_1facts_1_1fact.html#a12502f801faccdbe3dfd888dee71c310',1,'facter::facts::fact']]],
+  ['operating_5fsystem_5fmajor_5frelease',['operating_system_major_release',['../structfacter_1_1facts_1_1fact.html#aec50321a5bb1d4602ff2d4b142f0fd18',1,'facter::facts::fact']]],
+  ['operating_5fsystem_5frelease',['operating_system_release',['../structfacter_1_1facts_1_1fact.html#a3e7dea5678289ca868bdde8ab12f8244',1,'facter::facts::fact']]],
+  ['options',['options',['../structfacter_1_1facts_1_1resolvers_1_1filesystem__resolver_1_1mountpoint.html#a10c5089e44fa6e59a3e2f5e095d4135f',1,'facter::facts::resolvers::filesystem_resolver::mountpoint']]],
+  ['oracle_5fenterprise_5flinux',['oracle_enterprise_linux',['../structfacter_1_1facts_1_1os.html#a4e731b916dc831dcae747daaaeba6426',1,'facter::facts::os::oracle_enterprise_linux()'],['../structfacter_1_1facts_1_1linux_1_1release__file.html#af78245cfba99b2779791974d69aef6b1',1,'facter::facts::linux::release_file::oracle_enterprise_linux()']]],
+  ['oracle_5flinux',['oracle_linux',['../structfacter_1_1facts_1_1os.html#a40637483fa257a173f31165b7c547e27',1,'facter::facts::os::oracle_linux()'],['../structfacter_1_1facts_1_1linux_1_1release__file.html#a4e3e2ae86f83995a7413c1b63d521f50',1,'facter::facts::linux::release_file::oracle_linux()']]],
+  ['oracle_5fvm_5flinux',['oracle_vm_linux',['../structfacter_1_1facts_1_1os.html#a9b21319ee34629ea1d6aa49a95a1fc60',1,'facter::facts::os::oracle_vm_linux()'],['../structfacter_1_1facts_1_1linux_1_1release__file.html#adf75b788c0d6332792c8e4d15a9f911a',1,'facter::facts::linux::release_file::oracle_vm_linux()']]],
+  ['os',['os',['../structfacter_1_1facts_1_1fact.html#a123af6b46d6e3e3abe6db3efac8042c9',1,'facter::facts::fact::os()'],['../structfacter_1_1facts_1_1linux_1_1release__file.html#a590350540a32294697446aaf4edf3e39',1,'facter::facts::linux::release_file::os()']]],
+  ['os_5ffamily',['os_family',['../structfacter_1_1facts_1_1fact.html#a0722ab31c53dd7a8c4c62c57381d001d',1,'facter::facts::fact']]],
+  ['osx',['osx',['../structfacter_1_1facts_1_1resolvers_1_1operating__system__resolver_1_1data.html#ab9d37e04bcc0bdb4086de15230dff7c9',1,'facter::facts::resolvers::operating_system_resolver::data']]],
+  ['ovirt',['ovirt',['../structfacter_1_1facts_1_1vm.html#a4ce5efa2e3c6301d2e5b59d52c52b961',1,'facter::facts::vm']]]
+];
