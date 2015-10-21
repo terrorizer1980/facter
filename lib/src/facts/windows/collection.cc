@@ -1,6 +1,4 @@
 #include <facter/facts/collection.hpp>
-#include <facter/util/scoped_resource.hpp>
-#include <facter/util/environment.hpp>
 #include <internal/facts/external/json_resolver.hpp>
 #include <internal/facts/external/text_resolver.hpp>
 #include <internal/facts/external/yaml_resolver.hpp>
@@ -16,29 +14,45 @@
 #include <internal/facts/windows/timezone_resolver.hpp>
 #include <internal/facts/windows/uptime_resolver.hpp>
 #include <internal/facts/windows/virtualization_resolver.hpp>
-#include <internal/util/windows/system_error.hpp>
-#include <internal/util/windows/windows.hpp>
+#include <leatherman/util/environment.hpp>
+#include <leatherman/windows/system_error.hpp>
+#include <leatherman/windows/user.hpp>
+#include <leatherman/windows/windows.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/filesystem.hpp>
 #include <Shlobj.h>
 
 using namespace std;
-using namespace facter::util;
-using namespace facter::util::windows;
+using namespace leatherman::windows;
+using namespace leatherman::util;
 using namespace facter::facts::external;
 using namespace boost::filesystem;
 
 namespace facter { namespace facts {
 
-    vector<string> collection::get_external_fact_directories()
+    vector<string> collection::get_external_fact_directories() const
     {
-        // Get the user data path
-        TCHAR szPath[MAX_PATH];
-        if (!SUCCEEDED(SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath))) {
-            LOG_DEBUG("error finding COMMON_APPDATA: %1%", system_error());
+        if (user::is_admin()) {
+            // Get the common data path
+            TCHAR szPath[MAX_PATH];
+            if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath))) {
+                path p = path(szPath) / "PuppetLabs" / "facter" / "facts.d";
+                return {p.string()};
+            }
+
+            LOG_WARNING("error finding COMMON_APPDATA, external facts unavailable: %1%", system_error());
+        } else {
+            auto home = user::home_dir();
+            if (!home.empty()) {
+                path p1 = path(home) / ".puppetlabs" / "opt" / "facter" / "facts.d";
+                path p2 = path(home) / ".facter" / "facts.d";
+                return {p1.string(), p2.string()};
+            }
+
+            LOG_DEBUG("HOME environment variable not set, external facts unavailable");
         }
-        path p = path(szPath) / "PuppetLabs" / "facter" / "facts.d";
-        return vector<string>{p.string()};
+
+        return {};
     }
 
     vector<unique_ptr<external::resolver>> collection::get_external_resolvers()

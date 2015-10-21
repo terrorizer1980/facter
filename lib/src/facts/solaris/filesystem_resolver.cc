@@ -1,10 +1,10 @@
 #include <internal/facts/solaris/filesystem_resolver.hpp>
 #include <internal/util/solaris/k_stat.hpp>
 #include <internal/util/scoped_file.hpp>
-#include <internal/util/regex.hpp>
-#include <facter/util/file.hpp>
+#include <leatherman/file_util/file.hpp>
 #include <facter/util/string.hpp>
-#include <facter/execution/execution.hpp>
+#include <leatherman/util/regex.hpp>
+#include <leatherman/execution/execution.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
@@ -18,8 +18,8 @@
 using namespace std;
 using namespace facter::facts;
 using namespace facter::util;
-using namespace facter::execution;
 using namespace facter::util::solaris;
+using namespace leatherman::util;
 using namespace boost::filesystem;
 
 namespace facter { namespace facts { namespace solaris {
@@ -63,7 +63,7 @@ namespace facter { namespace facts { namespace solaris {
     {
         // Build a list of mounted filesystems
         static boost::regex fs_re("^fs/.*/(.*)$");
-        execution::each_line("/usr/sbin/sysdef", [&](string& line) {
+        leatherman::execution::each_line("/usr/sbin/sysdef", [&](string& line) {
             string fs;
             if (re_search(line, fs_re, &fs)) {
                 result.filesystems.insert(move(fs));

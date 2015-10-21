@@ -1,6 +1,6 @@
 #include <internal/facts/windows/uptime_resolver.hpp>
-#include <internal/util/windows/wmi.hpp>
-#include <internal/util/regex.hpp>
+#include <leatherman/windows/wmi.hpp>
+#include <leatherman/util/regex.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/gregorian/gregorian_types.hpp>
@@ -8,8 +8,8 @@
 namespace facter { namespace facts { namespace windows {
 
     using namespace std;
-    using namespace facter::util;
-    using namespace facter::util::windows;
+    using namespace leatherman::util;
+    using namespace leatherman::windows;
     using namespace boost::posix_time;
     using namespace boost::gregorian;
 

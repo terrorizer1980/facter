@@ -18,7 +18,7 @@ end
 @ip6_pattern = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/
 @mac_pattern = /^(([0-9a-fA-F]){2}\:){5}([0-9a-fA-F]){2}$/
 
-def validate_fact(node, fact_value, hidden)
+def validate_fact(name, node, fact_value, hidden)
   is_type = case node['type']
             when 'integer'
               fact_value.is_a? Integer
@@ -26,9 +26,12 @@ def validate_fact(node, fact_value, hidden)
               # http://www.yaml.org/spec/1.2/spec.html#id2804092 states the form of a double in YAML
               # If a type isn't explicit, it's reasonable to output a single integer value for a double,
               # as in 0 and 1, instead of 0.0 or 1.0.
-              fact_value.is_a? Float or fact_value.to_s =~ /^([0-9]|\.inf|\.nan|-\.inf)$/
+              # YAML-CPP seems to drop the decimal whenever it feels like it, so just match Int too.
+              fact_value.is_a? Float or fact_value.is_a? Integer or fact_value.to_s =~ /^(\.inf|\.nan|-\.inf)$/
             when 'string'
-              fact_value.is_a? String
+              # Any string can be interpreted as a more specific type by ruby
+              # YAML.
+              true
             when 'ip'
               fact_value.is_a? String and fact_value =~ @ip_pattern
             when 'ip6'
@@ -45,17 +48,16 @@ def validate_fact(node, fact_value, hidden)
             else
               fail "unexpected type in schema at #{node}"
             end
-  fail "type did not match schema, #{fact_value} is not a #{node['type']}" unless is_type
+  fail "type of #{name} did not match schema, #{fact_value} of type #{fact_value.class} is not a #{node['type']}" unless is_type
 
   hidden_attribute = node['hidden'] || false
-  fail "hidden fact was displayed by default" if hidden_attribute != hidden
+  fail "hidden fact '#{name}' was displayed by default" if hidden_attribute != hidden
 
   if fact_value.is_a? Hash
     elements = node['elements']
 
     # Validate the map's elements 'validate' is unset or true
-    validate_attribute = node['validate'] || true
-    if validate_attribute
+    if node['validate'].nil? || node['validate']
       # Nested facts are never hidden.
       validate_facts(fact_value, elements, false)
     end
@@ -70,7 +72,7 @@ def validate_facts(facts, schema, hidden)
 
     fact = find_child(schema, name, found)
     fail "Fact #{name} is not in the schema" unless fact
-    validate_fact(fact, value, hidden)
+    validate_fact(name, fact, value, hidden)
   end
 end
 
@@ -81,16 +83,28 @@ hidden = schema.select { |k, v| v['hidden'] && k !~ /<.*>/ }.map { |k, v| k }
 
 agents.each do |agent|
   step "Agent #{agent}: verify facter output against schema"
+  facts = {}
   on(agent, facter('--yaml')) do
     # Validate stdout against the schema
     facts = YAML.load(stdout.chomp)
     validate_facts(facts, schema, false)
   end
 
-  if not hidden.empty?
-    on(agent, facter(*hidden, '--yaml')) do
-      facts = YAML.load(stdout.chomp)
-      validate_facts(facts, schema, true)
+  hidden_facts = {}
+  on(agent, facter('--yaml', '--show-legacy')) do
+    # Re-use facts to find just hidden facts
+    all_facts = YAML.load(stdout.chomp)
+    hidden_facts = all_facts.reject { |k, v| facts.include? k }
+    validate_facts(hidden_facts, schema, true)
+  end
+
+  # Confirm hidden_facts has all the hidden entries from the schema
+  if missing_hidden = hidden.reject { |k, v| hidden_facts.include? k }
+    on(agent, facter(*missing_hidden, '--yaml')) do
+      resolved_hidden = YAML.load(stdout.chomp)
+      resolved_hidden.each do |name, value|
+        fail "missing hidden fact #{name} with value #{value} from legacy output" unless value.empty?
+      end
     end
   end
 end

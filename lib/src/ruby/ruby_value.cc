@@ -9,26 +9,27 @@ using namespace facter::facts;
 using namespace facter::util;
 using namespace rapidjson;
 using namespace YAML;
+using namespace leatherman::ruby;
 
 namespace facter { namespace ruby {
 
     ruby_value::ruby_value(VALUE value) :
         _value(value)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         ruby.rb_gc_register_address(&_value);
     }
 
     ruby_value::~ruby_value()
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         ruby.rb_gc_unregister_address(&_value);
     }
 
     ruby_value::ruby_value(ruby_value&& other) :
         _value(other._value)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         ruby.rb_gc_register_address(&_value);
     }
 
@@ -38,22 +39,22 @@ namespace facter { namespace ruby {
         return *this;
     }
 
-    void ruby_value::to_json(Allocator& allocator, rapidjson::Value& value) const
+    void ruby_value::to_json(json_allocator& allocator, json_value& value) const
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         to_json(ruby, _value, allocator, value);
     }
 
     ostream& ruby_value::write(ostream& os, bool quoted, unsigned int level) const
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         write(ruby, _value, os, quoted, level);
         return os;
     }
 
     Emitter& ruby_value::write(Emitter& emitter) const
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         write(ruby, _value, emitter);
         return emitter;
     }
@@ -63,7 +64,7 @@ namespace facter { namespace ruby {
         return _value;
     }
 
-    void ruby_value::to_json(api const& ruby, VALUE value, Allocator& allocator, rapidjson::Value& json)
+    void ruby_value::to_json(api const& ruby, VALUE value, json_allocator& allocator, json_value& json)
     {
         if (ruby.is_true(value)) {
             json.SetBool(true);
@@ -86,7 +87,7 @@ namespace facter { namespace ruby {
             return;
         }
         if (ruby.is_fixednum(value)) {
-            json.SetInt64(ruby.rb_num2ulong(value));
+            json.SetInt64(ruby.rb_num2long(value));
             return;
         }
         if (ruby.is_float(value)) {
@@ -99,9 +100,9 @@ namespace facter { namespace ruby {
             json.Reserve(size, allocator);
 
             ruby.array_for_each(value, [&](VALUE element) {
-                rapidjson::Value e;
-                to_json(ruby, element, allocator, e);
-                json.PushBack(e, allocator);
+                json_value child;
+                to_json(ruby, element, allocator, child);
+                json.PushBack(child, allocator);
                 return true;
             });
             return;
@@ -114,9 +115,9 @@ namespace facter { namespace ruby {
                 if (!ruby.is_string(key)) {
                     key = ruby.rb_funcall(key, ruby.rb_intern("to_s"), 0);
                 }
-                rapidjson::Value e;
-                to_json(ruby, element, allocator, e);
-                json.AddMember(ruby.rb_string_value_ptr(&key), e, allocator);
+                json_value child;
+                to_json(ruby, element, allocator, child);
+                json.AddMember(json_value(ruby.rb_string_value_ptr(&key), allocator), child, allocator);
                 return true;
             });
             return;
@@ -155,7 +156,7 @@ namespace facter { namespace ruby {
             return;
         }
         if (ruby.is_fixednum(value)) {
-            os << ruby.rb_num2ulong(value);
+            os << ruby.rb_num2long(value);
             return;
         }
         if (ruby.is_float(value)) {
@@ -241,7 +242,7 @@ namespace facter { namespace ruby {
             return;
         }
         if (ruby.is_fixednum(value)) {
-            emitter << ruby.rb_num2ulong(value);
+            emitter << ruby.rb_num2long(value);
             return;
         }
         if (ruby.is_float(value)) {

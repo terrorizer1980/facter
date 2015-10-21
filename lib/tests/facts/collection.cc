@@ -4,13 +4,14 @@
 #include <facter/facts/array_value.hpp>
 #include <facter/facts/map_value.hpp>
 #include <facter/facts/scalar_value.hpp>
-#include <facter/util/environment.hpp>
+#include <leatherman/util/environment.hpp>
 #include "../fixtures.hpp"
 #include <sstream>
 
 using namespace std;
 using namespace facter::facts;
-using namespace facter::util;
+using namespace leatherman::util;
+using namespace facter::testing;
 
 struct simple_resolver : facter::facts::resolver
 {
@@ -54,21 +55,22 @@ struct temp_variable
 };
 
 SCENARIO("using the fact collection") {
-    collection facts;
-    REQUIRE(facts.size() == 0);
+    collection_fixture facts;
+    REQUIRE(facts.size() == 0u);
     REQUIRE(facts.empty());
 
     GIVEN("default facts") {
-        facts.add_default_facts();
+        facts.add_default_facts(true);
         THEN("facts should resolve") {
-            REQUIRE(facts.size() > 0);
+            REQUIRE(facts.size() > 0u);
             REQUIRE_FALSE(facts.empty());
         }
     }
-    GIVEN("a single fact") {
+    GIVEN("a hidden fact and a revealed fact") {
         facts.add("foo", make_value<string_value>("bar"));
-        THEN("it should be in the collection") {
-            REQUIRE(facts.size() == 1);
+        facts.add("hidden_foo", make_value<string_value>("hidden_bar", true));
+        THEN("they should be in the collection") {
+            REQUIRE(facts.size() == 2u);
             REQUIRE_FALSE(facts.empty());
             auto fact = facts.get<string_value>("foo");
             REQUIRE(fact);
@@ -76,12 +78,86 @@ SCENARIO("using the fact collection") {
             fact = dynamic_cast<string_value const *>(facts["foo"]);
             REQUIRE(fact);
             REQUIRE(fact->value() == "bar");
+            auto hidden_fact = facts.get<string_value>("hidden_foo");
+            REQUIRE(hidden_fact);
+            REQUIRE(hidden_fact->value() == "hidden_bar");
+            hidden_fact = dynamic_cast<string_value const *>(facts["hidden_foo"]);
+            REQUIRE(hidden_fact);
+            REQUIRE(hidden_fact->value() == "hidden_bar");
+        }
+        WHEN("writing default facts") {
+            THEN("it should serialize the revealed fact to JSON") {
+                ostringstream ss;
+                facts.write(ss, format::json);
+                REQUIRE(ss.str() == "{\n  \"foo\": \"bar\"\n}");
+            }
+            THEN("it should serialize the revealed fact to YAML") {
+                ostringstream ss;
+                facts.write(ss, format::yaml);
+                REQUIRE(ss.str() == "foo: bar");
+            }
+            THEN("it should serialize the revealed fact to text") {
+                ostringstream ss;
+                facts.write(ss, format::hash);
+                REQUIRE(ss.str() == "foo => bar");
+            }
+        }
+        WHEN("writing all (hidden) facts") {
+            THEN("it should serialize both facts to JSON") {
+                ostringstream ss;
+                facts.write(ss, format::json, set<string>{}, true);
+                REQUIRE(ss.str() == "{\n  \"foo\": \"bar\",\n  \"hidden_foo\": \"hidden_bar\"\n}");
+            }
+            THEN("it should serialize both facts to YAML") {
+                ostringstream ss;
+                facts.write(ss, format::yaml, set<string>{}, true);
+                REQUIRE(ss.str() == "foo: bar\nhidden_foo: hidden_bar");
+            }
+            THEN("it should serialize both facts to text") {
+                ostringstream ss;
+                facts.write(ss, format::hash, set<string>{}, true);
+                REQUIRE(ss.str() == "foo => bar\nhidden_foo => hidden_bar");
+            }
+        }
+        WHEN("querying facts") {
+            THEN("it should serialize both facts to JSON") {
+                ostringstream ss;
+                facts.write(ss, format::json, {"foo", "hidden_foo"});
+                REQUIRE(ss.str() == "{\n  \"foo\": \"bar\",\n  \"hidden_foo\": \"hidden_bar\"\n}");
+            }
+            THEN("it should serialize both facts to YAML") {
+                ostringstream ss;
+                facts.write(ss, format::yaml, {"foo", "hidden_foo"});
+                REQUIRE(ss.str() == "foo: bar\nhidden_foo: hidden_bar");
+            }
+            THEN("it should serialize both facts to text") {
+                ostringstream ss;
+                facts.write(ss, format::hash, {"foo", "hidden_foo"});
+                REQUIRE(ss.str() == "foo => bar\nhidden_foo => hidden_bar");
+            }
+        }
+        WHEN("querying hidden facts") {
+            THEN("it should serialize both facts to JSON") {
+                ostringstream ss;
+                facts.write(ss, format::json, {"foo", "hidden_foo"}, true);
+                REQUIRE(ss.str() == "{\n  \"foo\": \"bar\",\n  \"hidden_foo\": \"hidden_bar\"\n}");
+            }
+            THEN("it should serialize both facts to YAML") {
+                ostringstream ss;
+                facts.write(ss, format::yaml, {"foo", "hidden_foo"}, true);
+                REQUIRE(ss.str() == "foo: bar\nhidden_foo: hidden_bar");
+            }
+            THEN("it should serialize both facts to text") {
+                ostringstream ss;
+                facts.write(ss, format::hash, {"foo", "hidden_foo"}, true);
+                REQUIRE(ss.str() == "foo => bar\nhidden_foo => hidden_bar");
+            }
         }
     }
     GIVEN("a resolver that adds a single fact") {
         facts.add(make_shared<simple_resolver>());
         THEN("it should resolve facts into the collection") {
-            REQUIRE(facts.size() == 1);
+            REQUIRE(facts.size() == 1u);
             REQUIRE_FALSE(facts.empty());
             auto fact = facts.get<string_value>("foo");
             REQUIRE(fact);
@@ -170,7 +246,7 @@ SCENARIO("using the fact collection") {
                 LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/text",
         });
         REQUIRE_FALSE(facts.empty());
-        REQUIRE(facts.size() == 17);
+        REQUIRE(facts.size() == 17u);
         WHEN("YAML files are present") {
             THEN("facts should be added") {
                 REQUIRE(facts.get<string_value>("yaml_fact1"));
@@ -230,7 +306,7 @@ SCENARIO("using the fact collection") {
             THEN("a value should be returned") {
                 auto mvalue = facts.query<map_value>("map");
                 REQUIRE(mvalue);
-                REQUIRE(mvalue->size() == 7);
+                REQUIRE(mvalue->size() == 7u);
             }
         }
         WHEN("queried with a non-matching top level name") {
@@ -259,7 +335,7 @@ SCENARIO("using the fact collection") {
                 REQUIRE(bvalue->value());
                 auto mvalue = facts.query<map_value>("map.submap");
                 REQUIRE(mvalue);
-                REQUIRE(mvalue->size() == 1);
+                REQUIRE(mvalue->size() == 1u);
             }
         }
         WHEN("querying along a path of map values") {
@@ -273,7 +349,7 @@ SCENARIO("using the fact collection") {
             THEN("a value should be returned") {
                 auto avalue = facts.query<array_value>("map.array");
                 REQUIRE(avalue);
-                REQUIRE(avalue->size() == 5);
+                REQUIRE(avalue->size() == 5u);
                 for (size_t i = 0; i < avalue->size(); ++i) {
                     REQUIRE(facts.query("map.array." + to_string(i)));
                 }
@@ -316,14 +392,14 @@ SCENARIO("using the fact collection") {
         REQUIRE(added);
 
         THEN("the fact should be present in the collection") {
-            REQUIRE(facts.size() == 1);
+            REQUIRE(facts.size() == 1u);
             auto value = facts.get<string_value>("foo");
             REQUIRE(value);
             REQUIRE(value->value() == "bar");
         }
     }
     GIVEN("a fact from an environment with the same name as a built-in fact") {
-        facts.add_default_facts();
+        facts.add_default_facts(true);
         auto var = temp_variable("FACTER_KERNEL", "overridden");
         bool added = false;
         facts.add_environment_facts([&](string const& name) {
@@ -335,6 +411,68 @@ SCENARIO("using the fact collection") {
             auto value = facts.get<string_value>("kernel");
             REQUIRE(value);
             REQUIRE(value->value() == "overridden");
+        }
+    }
+    GIVEN("two external fact directories to search") {
+        facts.add_external_facts({
+            LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/ordering/foo",
+            LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/ordering/bar"
+        });
+        THEN("it should have the fact value from the last file loaded") {
+            REQUIRE(facts.size() == 1u);
+            REQUIRE(facts.get<string_value>("foo"));
+            REQUIRE(facts.get<string_value>("foo")->value() == "set in bar/foo.yaml");
+        }
+        facts.clear();
+        facts.add_external_facts({
+            LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/ordering/bar",
+            LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/ordering/foo"
+        });
+        THEN("it should have the fact value from the last file loaded") {
+            REQUIRE(facts.size() == 1u);
+            REQUIRE(facts.get<string_value>("foo"));
+            REQUIRE(facts.get<string_value>("foo")->value() == "set in foo/foo.yaml");
+        }
+    }
+}
+
+class collection_override : public collection
+{
+ protected:
+    virtual vector<string> get_external_fact_directories() const override
+    {
+        return {LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/ordering/foo"};
+    }
+};
+
+SCENARIO("using the fact collection with a default external fact path") {
+    collection_override facts;
+    REQUIRE(facts.size() == 0u);
+    REQUIRE(facts.empty());
+
+    GIVEN("a specified external fact directory with an overriding fact to search") {
+        facts.add_external_facts({
+            LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/ordering/bar"
+        });
+        THEN("it should have the fact value from the last file loaded") {
+            REQUIRE(facts.size() == 1u);
+            REQUIRE(facts.get<string_value>("foo"));
+            REQUIRE(facts.get<string_value>("foo")->value() == "set in bar/foo.yaml");
+        }
+    }
+
+    GIVEN("a specified external fact directory with new facts to search") {
+        facts.add_external_facts({
+            LIBFACTER_TESTS_DIRECTORY "/fixtures/facts/external/text",
+        });
+        REQUIRE_FALSE(facts.empty());
+        REQUIRE(facts.size() == 4);
+        THEN("facts from both directories should be added") {
+            REQUIRE(facts.get<string_value>("foo"));
+            REQUIRE(facts.get<string_value>("txt_fact1"));
+            REQUIRE(facts.get<string_value>("txt_fact2"));
+            REQUIRE_FALSE(facts.get<string_value>("txt_fact3"));
+            REQUIRE(facts.get<string_value>("txt_fact4"));
         }
     }
 }

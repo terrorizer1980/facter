@@ -1,12 +1,12 @@
 #include <internal/facts/linux/virtualization_resolver.hpp>
-#include <internal/util/regex.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/collection.hpp>
 #include <facter/facts/fact.hpp>
 #include <facter/facts/vm.hpp>
-#include <facter/execution/execution.hpp>
-#include <facter/util/file.hpp>
+#include <leatherman/execution/execution.hpp>
+#include <leatherman/file_util/file.hpp>
 #include <leatherman/logging/logging.hpp>
+#include <leatherman/util/regex.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
 #include <vector>
@@ -14,10 +14,12 @@
 
 using namespace std;
 using namespace facter::facts;
-using namespace facter::util;
-using namespace facter::execution;
+using namespace leatherman::util;
+using namespace leatherman::execution;
 using namespace boost::filesystem;
+
 namespace bs = boost::system;
+namespace lth_file = leatherman::file_util;
 
 namespace facter { namespace facts { namespace linux {
 
@@ -58,7 +60,10 @@ namespace facter { namespace facts { namespace linux {
 
         // Next check the DMI product name for the VM
         if (value.empty()) {
-            value = get_product_name_vm(facts);
+            auto product_name = facts.get<string_value>(fact::product_name);
+            if (product_name) {
+                value = get_product_name_vm(product_name->value());
+            }
         }
 
         // Lastly, resort to lspci to look for hardware related to certain VMs
@@ -72,17 +77,17 @@ namespace facter { namespace facts { namespace linux {
     string virtualization_resolver::get_cgroup_vm()
     {
         string value;
-        file::each_line("/proc/1/cgroup", [&](string& line) {
+        lth_file::each_line("/proc/1/cgroup", [&](string& line) {
             vector<boost::iterator_range<string::iterator>> parts;
             boost::split(parts, line, boost::is_any_of(":"), boost::token_compress_on);
             if (parts.size() < 3) {
                 return true;
             }
-            if (boost::starts_with(parts[2], boost::as_literal("/docker/"))) {
+            if (boost::contains(parts[2], boost::as_literal("/docker"))) {
                 value = vm::docker;
                 return false;
             }
-            if (boost::starts_with(parts[2], boost::as_literal("/lxc/"))) {
+            if (boost::contains(parts[2], boost::as_literal("/lxc"))) {
                 value = vm::lxc;
                 return false;
             }
@@ -104,7 +109,7 @@ namespace facter { namespace facts { namespace linux {
     {
         string virt_what = [] {
 #ifdef FACTER_PATH
-            string fixed = execution::which("virt-what", {FACTER_PATH});
+            string fixed = which("virt-what", {FACTER_PATH});
             if (fixed.empty()) {
                 LOG_WARNING("virt-what not found at configured location %1%, using PATH instead", FACTER_PATH);
             } else {
@@ -114,7 +119,7 @@ namespace facter { namespace facts { namespace linux {
             return string("virt-what");
         }();
         string value;
-        execution::each_line(virt_what, [&](string& line) {
+        each_line(virt_what, [&](string& line) {
             // Some versions of virt-what dump error/warning messages to stdout
             if (boost::starts_with(line, "virt-what:")) {
                 return true;
@@ -149,7 +154,7 @@ namespace facter { namespace facts { namespace linux {
     string virtualization_resolver::get_vserver_vm()
     {
         string value;
-        file::each_line("/proc/self/status", [&](string& line) {
+        lth_file::each_line("/proc/self/status", [&](string& line) {
             vector<boost::iterator_range<string::iterator>> parts;
             boost::split(parts, line, boost::is_space(), boost::token_compress_on);
             if (parts.size() != 2) {
@@ -170,12 +175,12 @@ namespace facter { namespace facts { namespace linux {
 
     string virtualization_resolver::get_vmware_vm()
     {
-        auto result = execute("vmware", { "-v" });
-        if (!result.first) {
+        auto exec = execute("vmware", { "-v" });
+        if (!exec.success) {
             return {};
         }
         vector<string> parts;
-        boost::split(parts, result.second, boost::is_space(), boost::token_compress_on);
+        boost::split(parts, exec.output, boost::is_space(), boost::token_compress_on);
         if (parts.size() < 2) {
             return {};
         }
@@ -194,7 +199,7 @@ namespace facter { namespace facts { namespace linux {
             return {};
         }
         string value;
-        file::each_line("/proc/self/status", [&](string& line) {
+        lth_file::each_line("/proc/self/status", [&](string& line) {
             vector<boost::iterator_range<string::iterator>> parts;
             boost::split(parts, line, boost::is_space(), boost::token_compress_on);
             if (parts.size() != 2) {
@@ -231,35 +236,6 @@ namespace facter { namespace facts { namespace linux {
         return {};
     }
 
-    string virtualization_resolver::get_product_name_vm(collection& facts)
-    {
-        static vector<tuple<string, string>> vms = {
-            make_tuple("VMware",            string(vm::vmware)),
-            make_tuple("VirtualBox",        string(vm::virtualbox)),
-            make_tuple("Parallels",         string(vm::parallels)),
-            make_tuple("KVM",               string(vm::kvm)),
-            make_tuple("Virtual Machine",   string(vm::hyperv)),
-            make_tuple("RHEV Hypervisor",   string(vm::redhat_ev)),
-            make_tuple("oVirt Node",        string(vm::ovirt)),
-            make_tuple("HVM domU",          string(vm::xen_hardware)),
-            make_tuple("Bochs",             string(vm::bochs)),
-        };
-
-        auto product_name = facts.get<string_value>(fact::product_name);
-        if (!product_name) {
-            return {};
-        }
-
-        auto const& value = product_name->value();
-
-        for (auto const& vm : vms) {
-            if (value.find(get<0>(vm)) != string::npos) {
-                return get<1>(vm);
-            }
-        }
-        return {};
-    }
-
     string virtualization_resolver::get_lspci_vm()
     {
         static vector<tuple<boost::regex, string>> vms = {
@@ -273,7 +249,7 @@ namespace facter { namespace facts { namespace linux {
         };
 
         string value;
-        execution::each_line("lspci", [&](string& line) {
+        each_line("lspci", [&](string& line) {
             for (auto const& vm : vms) {
                 if (re_search(line, get<0>(vm))) {
                     value = get<1>(vm);

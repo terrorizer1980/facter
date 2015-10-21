@@ -1,10 +1,9 @@
 #include <internal/facts/windows/networking_resolver.hpp>
-#include <internal/util/windows/registry.hpp>
-#include <internal/util/windows/system_error.hpp>
+#include <leatherman/windows/registry.hpp>
+#include <leatherman/windows/system_error.hpp>
 #include <internal/util/windows/wsa.hpp>
-#include <internal/util/windows/windows.hpp>
+#include <leatherman/windows/windows.hpp>
 #include <leatherman/logging/logging.hpp>
-#include <boost/algorithm/string.hpp>
 #include <boost/range/combine.hpp>
 #include <boost/nowide/convert.hpp>
 #include <iomanip>
@@ -21,7 +20,7 @@
 using namespace std;
 using namespace facter::util;
 using namespace facter::util::windows;
-using namespace boost::algorithm;
+using namespace leatherman::windows;
 
 namespace facter { namespace facts { namespace windows {
 
@@ -53,18 +52,6 @@ namespace facter { namespace facts { namespace windows {
 
         buffer.resize(size);
         return boost::nowide::narrow(buffer);
-    }
-
-    bool networking_resolver::ignored_ipv4_address(string const& addr)
-    {
-        // Excluding localhost and 169.254.x.x in Windows - this is the DHCP APIPA, meaning that if the node cannot
-        // get an ip address from the dhcp server, it auto-assigns a private ip address
-        return addr.empty() || addr == "127.0.0.1" || boost::starts_with(addr, "169.254.");
-    }
-
-    bool networking_resolver::ignored_ipv6_address(string const& addr)
-    {
-        return addr.empty() || addr == "::1" || boost::starts_with(addr, "fe80");
     }
 
     sockaddr_in networking_resolver::create_ipv4_mask(uint8_t masklen)
@@ -186,7 +173,7 @@ namespace facter { namespace facts { namespace windows {
             return result;
         }
 
-        wsa winsock;
+        facter::util::windows::wsa winsock;
 
         map<string, pair<string, string>> adapterInfoMasks;
         for (auto pCurAddr = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(pAddresses.data());
@@ -207,11 +194,28 @@ namespace facter { namespace facts { namespace windows {
             // Only supported on platforms after Windows Server 2003.
             if (pCurAddr->Flags & IP_ADAPTER_DHCP_ENABLED && pCurAddr->Length >= sizeof(IP_ADAPTER_ADDRESSES_LH)) {
                 auto adapter = reinterpret_cast<IP_ADAPTER_ADDRESSES_LH&>(*pCurAddr);
-                net_interface.dhcp_server = winsock.saddress_to_string(adapter.Dhcpv4Server);
+                if (adapter.Flags & IP_ADAPTER_DHCP_ENABLED) {
+                    try {
+                        net_interface.dhcp_server = winsock.saddress_to_string(adapter.Dhcpv4Server);
+                    } catch (wsa_exception &e) {
+                        LOG_DEBUG("failed to retrieve dhcp v4 server address for %1%: %2%", net_interface.name, e.what());
+                    }
+                }
             }
 
             for (auto it = pCurAddr->FirstUnicastAddress; it; it = it->Next) {
-                string addr = winsock.saddress_to_string(it->Address);
+                string addr;
+                try {
+                    addr = winsock.saddress_to_string(it->Address);
+                } catch (wsa_exception &e) {
+                    string iptype =
+                        (it->Address.lpSockaddr->sa_family == AF_INET) ? " v4"
+                        : (it->Address.lpSockaddr->sa_family == AF_INET6) ? " v6"
+                        : "";
+                    LOG_DEBUG("failed to retrieve ip%1% address for %2%: %3%",
+                        iptype, net_interface.name, e.what());
+                }
+
                 if (addr.empty()) {
                     continue;
                 }
@@ -232,58 +236,61 @@ namespace facter { namespace facts { namespace windows {
                 }
 #endif
 
-                if (it->Address.lpSockaddr->sa_family == AF_INET) {
-                    net_interface.address.v4 = move(addr);
+                if (it->Address.lpSockaddr->sa_family == AF_INET || it->Address.lpSockaddr->sa_family == AF_INET6) {
+                    bool ipv6 = it->Address.lpSockaddr->sa_family == AF_INET6;
+
+                    binding b;
+                    b.address = addr;
 
                     if (adapterInfoMasks.empty()) {
                         // Need to do lookup based on the structure length.
                         auto adapterAddr = reinterpret_cast<IP_ADAPTER_UNICAST_ADDRESS_LH&>(*it);
-                        auto mask = create_ipv4_mask(adapterAddr.OnLinkPrefixLength);
-                        net_interface.netmask.v4 = winsock.address_to_string(mask);
-
-                        auto masked = mask_ipv4_address(it->Address.lpSockaddr, mask);
-                        net_interface.network.v4 = winsock.address_to_string(masked);
+                        if (ipv6) {
+                            auto mask = create_ipv6_mask(adapterAddr.OnLinkPrefixLength);
+                            auto masked = mask_ipv6_address(it->Address.lpSockaddr, mask);
+                            b.netmask = winsock.address_to_string(mask);
+                            b.network = winsock.address_to_string(masked);
+                        } else {
+                            auto mask = create_ipv4_mask(adapterAddr.OnLinkPrefixLength);
+                            auto masked = mask_ipv4_address(it->Address.lpSockaddr, mask);
+                            b.netmask = winsock.address_to_string(mask);
+                            b.network = winsock.address_to_string(masked);
+                        }
                     } else {
 #ifdef WIN_SERVER_2003_SUPPORT
-                        auto ip_mask = adapterInfoMasks.find(net_interface.address.v4);
-                        if (ip_mask != adapterInfoMasks.end()) {
-                            net_interface.netmask.v4 = ip_mask->second.first;
-
-                            auto mask = winsock.string_to_address<sockaddr_in, AF_INET>(ip_mask->second.first);
-                            auto masked = mask_ipv4_address(it->Address.lpSockaddr, mask);
-                            net_interface.network.v4 = winsock.address_to_string(masked);
+                        if (ipv6) {
+                            LOG_DEBUG("netmask for %1% (IPv6) is not supported on this platform", b.address);
                         } else {
-                            LOG_DEBUG("could not find netmask for %1%", net_interface.address.v4);
+                            auto ip_mask = adapterInfoMasks.find(b.address);
+                            if (ip_mask != adapterInfoMasks.end()) {
+                                b.netmask = ip_mask->second.first;
+
+                                auto mask = winsock.string_to_address<sockaddr_in, AF_INET>(b.netmask);
+                                auto masked = mask_ipv4_address(it->Address.lpSockaddr, mask);
+                                b.network = winsock.address_to_string(masked);
+                            } else {
+                                LOG_DEBUG("could not find netmask for %1%", b.address);
+                            }
                         }
 #endif
                     }
-                } else if (it->Address.lpSockaddr->sa_family == AF_INET6) {
-                    net_interface.address.v6 = move(addr);
 
-                    // Get mask if on a system later than Windows Server 2003. On 2003, we can't retrieve IPv6 masks.
-                    if (adapterInfoMasks.empty()) {
-                        auto adapterAddr = reinterpret_cast<IP_ADAPTER_UNICAST_ADDRESS_LH&>(*it);
-                        auto mask = create_ipv6_mask(adapterAddr.OnLinkPrefixLength);
-                        net_interface.netmask.v6 = winsock.address_to_string(mask);
-
-                        auto masked = mask_ipv6_address(it->Address.lpSockaddr, mask);
-                        net_interface.network.v6 = winsock.address_to_string(masked);
+                    if (ipv6) {
+                        net_interface.ipv6_bindings.emplace_back(std::move(b));
                     } else {
-#ifdef WIN_SERVER_2003_SUPPORT
-                        LOG_DEBUG("netmask for %1% (IPv6) is not supported on this platform", net_interface.address.v6);
-#endif
+                        net_interface.ipv4_bindings.emplace_back(std::move(b));
+                    }
+
+                    // http://support.microsoft.com/kb/894564 talks about how binding order is determined.
+                    // GetAdaptersAddresses returns adapters in binding order. This way, the domain and primary_interface match.
+                    // The old facter behavior didn't make a lot of sense (it would pick the last in binding order, not 1st).
+                    // Only accept this as a primary interface if it has a non-link-local address.
+                    if (result.primary_interface.empty() && (
+                        (it->Address.lpSockaddr->sa_family == AF_INET && !ignored_ipv4_address(addr)) ||
+                        (it->Address.lpSockaddr->sa_family == AF_INET6 && !ignored_ipv6_address(addr)))) {
+                        result.primary_interface = net_interface.name;
                     }
                 }
-            }
-
-            // http://support.microsoft.com/kb/894564 talks about how binding order is determined.
-            // GetAdaptersAddresses returns adapters in binding order. This way, the domain and primary_interface match.
-            // The old facter behavior didn't make a lot of sense (it would pick the last in binding order, not 1st).
-            // Only accept this as a primary interface if it has a non-link-local address.
-            if (result.primary_interface.empty() &&
-                (!ignored_ipv4_address(net_interface.address.v4) ||
-                 !ignored_ipv6_address(net_interface.address.v6))) {
-                result.primary_interface = net_interface.name;
             }
 
             stringstream macaddr;

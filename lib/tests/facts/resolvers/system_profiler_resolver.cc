@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_system_profiler_resolver : system_profiler_resolver
 {
@@ -50,11 +52,11 @@ struct test_system_profiler_resolver : system_profiler_resolver
 };
 
 SCENARIO("using the system profiler resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_system_profiler_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
@@ -68,7 +70,7 @@ SCENARIO("using the system profiler resolver") {
         THEN("a structured fact is added") {
             auto system_profiler = facts.get<map_value>(fact::system_profiler);
             REQUIRE(system_profiler);
-            REQUIRE(system_profiler->size() == 21);
+            REQUIRE(system_profiler->size() == 21u);
             static const vector<string> names = {
                 "boot_mode",
                 "boot_rom_version",
@@ -99,7 +101,7 @@ SCENARIO("using the system profiler resolver") {
             }
         }
         THEN("flat facts are added") {
-            REQUIRE(facts.size() == 22);
+            REQUIRE(facts.size() == 22u);
             static const map<string, string> check = {
                 { string(fact::sp_boot_mode), "boot_mode" },
                 { string(fact::sp_boot_rom_version), "boot_rom_version" },

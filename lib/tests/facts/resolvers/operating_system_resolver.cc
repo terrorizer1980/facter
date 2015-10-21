@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_os_resolver : operating_system_resolver
 {
@@ -25,6 +27,7 @@ struct test_os_resolver : operating_system_resolver
     {
         data result;
         result.name = "Archlinux";
+        result.family = "Archlinux";
         result.release = "1.2.3";
         result.specification_version = "1.4";
         result.distro.id = "Arch";
@@ -46,31 +49,26 @@ struct test_os_resolver : operating_system_resolver
         result.selinux.policy_version = "policy version";
         return result;
     }
-
-    virtual tuple<string, string> parse_release(string const& name, string const& release) const override
-    {
-        return make_tuple("1.2", "3");
-    }
 };
 
 SCENARIO("using the operating system resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_os_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
         facts.add(make_shared<test_os_resolver>());
-        REQUIRE(facts.size() == 26);
+        REQUIRE(facts.size() == 26u);
         THEN("a structured fact is added") {
             auto os = facts.get<map_value>(fact::os);
             REQUIRE(os);
-            REQUIRE(os->size() == 9);
+            REQUIRE(os->size() == 9u);
             auto distro = os->get<map_value>("distro");
             REQUIRE(distro);
-            REQUIRE(distro->size() == 5);
+            REQUIRE(distro->size() == 5u);
             auto codename = distro->get<string_value>("codename");
             REQUIRE(codename);
             REQUIRE(codename->value() == "awesomesauce");
@@ -85,16 +83,16 @@ SCENARIO("using the operating system resolver") {
             REQUIRE(lsbrelease->value() == "1.4");
             auto release_attribute = distro->get<map_value>("release");
             REQUIRE(release_attribute);
-            REQUIRE(release_attribute->size() == 3);
+            REQUIRE(release_attribute->size() == 3u);
             auto release = release_attribute->get<string_value>("full");
             REQUIRE(release);
             REQUIRE(release->value() == "1.2.3");
             auto major = release_attribute->get<string_value>("major");
             REQUIRE(major);
-            REQUIRE(major->value() == "1.2");
+            REQUIRE(major->value() == "1");
             auto minor = release_attribute->get<string_value>("minor");
             REQUIRE(minor);
-            REQUIRE(minor->value() == "3");
+            REQUIRE(minor->value() == "2");
             auto family = os->get<string_value>("family");
             REQUIRE(family);
             REQUIRE(family->value() == "Archlinux");
@@ -109,19 +107,19 @@ SCENARIO("using the operating system resolver") {
             REQUIRE(hardware->value() == "x86-64");
             release_attribute = os->get<map_value>("release");
             REQUIRE(release_attribute);
-            REQUIRE(release_attribute->size() == 3);
+            REQUIRE(release_attribute->size() == 3u);
             release = release_attribute->get<string_value>("full");
             REQUIRE(release);
             REQUIRE(release->value() == "1.2.3");
             major = release_attribute->get<string_value>("major");
             REQUIRE(major);
-            REQUIRE(major->value() == "1.2");
+            REQUIRE(major->value() == "1");
             minor = release_attribute->get<string_value>("minor");
             REQUIRE(minor);
-            REQUIRE(minor->value() == "3");
+            REQUIRE(minor->value() == "2");
             auto macosx = os->get<map_value>("macosx");
             REQUIRE(macosx);
-            REQUIRE(macosx->size() == 3);
+            REQUIRE(macosx->size() == 3u);
             auto product = macosx->get<string_value>("product");
             REQUIRE(product);
             REQUIRE(product->value() == "Mac OS X");
@@ -130,7 +128,7 @@ SCENARIO("using the operating system resolver") {
             REQUIRE(build->value() == "14A388b");
             release_attribute = macosx->get<map_value>("version");
             REQUIRE(release_attribute);
-            REQUIRE(release_attribute->size() == 3);
+            REQUIRE(release_attribute->size() == 3u);
             release = release_attribute->get<string_value>("full");
             REQUIRE(release);
             REQUIRE(release->value() == "10.10");
@@ -142,13 +140,13 @@ SCENARIO("using the operating system resolver") {
             REQUIRE(minor->value() == "0");
             auto windows = os->get<map_value>("windows");
             REQUIRE(windows);
-            REQUIRE(windows->size() == 1);
+            REQUIRE(windows->size() == 1u);
             auto system32 = windows->get<string_value>("system32");
             REQUIRE(system32);
             REQUIRE(system32->value() == "C:\\WINDOWS\\sysnative");
             auto selinux = os->get<map_value>("selinux");
             REQUIRE(selinux);
-            REQUIRE(selinux->size() == 6);
+            REQUIRE(selinux->size() == 6u);
             auto bval = selinux->get<boolean_value>("enabled");
             REQUIRE(bval);
             REQUIRE(bval->value());
@@ -183,7 +181,7 @@ SCENARIO("using the operating system resolver") {
             REQUIRE(release->value() == "1.2.3");
             auto major = facts.get<string_value>(fact::operating_system_major_release);
             REQUIRE(major);
-            REQUIRE(major->value() == "1.2");
+            REQUIRE(major->value() == "1");
             auto family = facts.get<string_value>(fact::os_family);
             REQUIRE(family);
             REQUIRE(family->value() == "Archlinux");
@@ -201,10 +199,10 @@ SCENARIO("using the operating system resolver") {
             REQUIRE(release->value() == "1.2.3");
             major = facts.get<string_value>(fact::lsb_dist_major_release);
             REQUIRE(major);
-            REQUIRE(major->value() == "1.2");
+            REQUIRE(major->value() == "1");
             auto minor = facts.get<string_value>(fact::lsb_dist_minor_release);
             REQUIRE(minor);
-            REQUIRE(minor->value() == "3");
+            REQUIRE(minor->value() == "2");
             auto lsbrelease = facts.get<string_value>(fact::lsb_release);
             REQUIRE(lsbrelease);
             REQUIRE(lsbrelease->value() == "1.4");

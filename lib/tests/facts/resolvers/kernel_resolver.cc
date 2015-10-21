@@ -3,10 +3,12 @@
 #include <facter/facts/collection.hpp>
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_kernel_resolver : kernel_resolver
 {
@@ -31,17 +33,17 @@ struct test_kernel_resolver : kernel_resolver
 };
 
 SCENARIO("using the kernel resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_kernel_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
         facts.add(make_shared<test_kernel_resolver>());
         THEN("flat facts are added") {
-            REQUIRE(facts.size() == 4);
+            REQUIRE(facts.size() == 4u);
             auto kernel = facts.get<string_value>(fact::kernel);
             REQUIRE(kernel);
             REQUIRE(kernel->value() == "foo");

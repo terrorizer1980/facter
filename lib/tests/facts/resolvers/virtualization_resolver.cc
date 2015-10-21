@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/vm.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_virtualization_resolver : virtualization_resolver
 {
@@ -35,7 +37,7 @@ struct unknown_non_virtual_hypervisor_resolver : virtualization_resolver
         return "foobar";
     }
 
-    virtual bool is_virtual(string const& hypervisor)
+    virtual bool is_virtual(string const& hypervisor) override
     {
         return hypervisor != "foobar";
     }
@@ -50,12 +52,21 @@ struct known_hypervisor_resolver : virtualization_resolver
     }
 };
 
+struct matched_hypervisor_resolver : virtualization_resolver
+{
+ protected:
+    virtual string get_hypervisor(collection& facts) override
+    {
+        return get_product_name_vm("VMware");
+    }
+};
+
 SCENARIO("using the virtualization resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("no hypervisor is returned") {
         facts.add(make_shared<empty_virtualization_resolver>());
         THEN("the system is reported as physical") {
-            REQUIRE(facts.size() == 2);
+            REQUIRE(facts.size() == 2u);
             auto is_virt = facts.get<boolean_value>(fact::is_virtual);
             REQUIRE(is_virt);
             REQUIRE_FALSE(is_virt->value());
@@ -67,7 +78,7 @@ SCENARIO("using the virtualization resolver") {
     WHEN("an unknown virtual hypervisor is returned") {
         facts.add(make_shared<unknown_hypervisor_resolver>());
         THEN("the system is reported as virtual") {
-            REQUIRE(facts.size() == 2);
+            REQUIRE(facts.size() == 2u);
             auto is_virt = facts.get<boolean_value>(fact::is_virtual);
             REQUIRE(is_virt);
             REQUIRE(is_virt->value());
@@ -79,7 +90,7 @@ SCENARIO("using the virtualization resolver") {
     WHEN("an unknown physical hypervisor is returned") {
         facts.add(make_shared<unknown_non_virtual_hypervisor_resolver>());
         THEN("the system is reported as virtual") {
-            REQUIRE(facts.size() == 2);
+            REQUIRE(facts.size() == 2u);
             auto is_virt = facts.get<boolean_value>(fact::is_virtual);
             REQUIRE(is_virt);
             REQUIRE_FALSE(is_virt->value());
@@ -91,13 +102,25 @@ SCENARIO("using the virtualization resolver") {
     WHEN("an known hypervisor is returned") {
         facts.add(make_shared<known_hypervisor_resolver>());
         THEN("the system is reported as virtual") {
-            REQUIRE(facts.size() == 2);
+            REQUIRE(facts.size() == 2u);
             auto is_virt = facts.get<boolean_value>(fact::is_virtual);
             REQUIRE(is_virt);
             REQUIRE(is_virt->value());
             auto hypervisor = facts.get<string_value>(fact::virtualization);
             REQUIRE(hypervisor);
             REQUIRE(hypervisor->value() == string(vm::docker));
+        }
+    }
+    WHEN("a hypervisor is matched from product name") {
+        facts.add(make_shared<matched_hypervisor_resolver>());
+        THEN("the system is reported as virtual") {
+            REQUIRE(facts.size() == 2u);
+            auto is_virt = facts.get<boolean_value>(fact::is_virtual);
+            REQUIRE(is_virt);
+            REQUIRE(is_virt->value());
+            auto hypervisor = facts.get<string_value>(fact::virtualization);
+            REQUIRE(hypervisor);
+            REQUIRE(hypervisor->value() == string(vm::vmware));
         }
     }
 }

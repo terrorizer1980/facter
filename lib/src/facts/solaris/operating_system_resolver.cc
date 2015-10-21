@@ -1,12 +1,34 @@
 #include <internal/facts/solaris/operating_system_resolver.hpp>
-#include <internal/util/regex.hpp>
 #include <facter/facts/os.hpp>
-#include <facter/util/file.hpp>
+#include <facter/facts/os_family.hpp>
+#include <leatherman/file_util/file.hpp>
+#include <leatherman/util/regex.hpp>
 
 using namespace std;
-using namespace facter::util;
+using namespace leatherman::util;
+
+namespace lth_file = leatherman::file_util;
 
 namespace facter { namespace facts { namespace solaris {
+
+    static string get_family(string const& name)
+    {
+        if (!name.empty()) {
+            static map<string, string> const systems = {
+                { string(os::sunos),                    string(os_family::solaris) },
+                { string(os::solaris),                  string(os_family::solaris) },
+                { string(os::nexenta),                  string(os_family::solaris) },
+                { string(os::omni),                     string(os_family::solaris) },
+                { string(os::open_indiana),             string(os_family::solaris) },
+                { string(os::smart),                    string(os_family::solaris) },
+            };
+            auto const& it = systems.find(name);
+            if (it != systems.end()) {
+                return it->second;
+            }
+        }
+        return {};
+    }
 
     operating_system_resolver::data operating_system_resolver::collect_data(collection& facts)
     {
@@ -14,6 +36,11 @@ namespace facter { namespace facts { namespace solaris {
         auto result = posix::operating_system_resolver::collect_data(facts);
         if (result.name == os::sunos) {
             result.name = os::solaris;
+        }
+
+        auto family = get_family(result.name);
+        if (!family.empty()) {
+            result.family = move(family);
         }
 
         /*
@@ -27,32 +54,30 @@ namespace facter { namespace facts { namespace solaris {
          to be resolved further using the `pkg info kernel` command (TODO).
          */
 
-        static boost::regex regexp_s10("Solaris \\d+ \\d+/\\d+ s(\\d+)x_u(\\d+)wos_");
+        static boost::regex regexp_s10("Solaris \\d+ \\d+/\\d+ s(\\d+)[sx]?_u(\\d+)wos_");
         static boost::regex regexp_s11("Solaris (\\d+)[.](\\d+)");
         static boost::regex regexp_s11b("Solaris (\\d+) ");
-        file::each_line("/etc/release", [&](string& line) {
-            string major;
-            string minor;
+        lth_file::each_line("/etc/release", [&](string& line) {
+            string major, minor;
             if (re_search(line, regexp_s10, &major, &minor)) {
                 result.release = major + "_u" + minor;
+                result.major = move(major);
+                result.minor = move(minor);
                 return false;
             } else if (re_search(line, regexp_s11, &major, &minor)) {
                 result.release = major + "." + minor;
+                result.major = move(major);
+                result.minor = move(minor);
                 return false;
             } else if (re_search(line, regexp_s11b, &major)) {
                 result.release = major + ".0";
+                result.major = move(major);
+                result.minor = "0";
                 return false;
             }
             return true;
         });
         return result;
-    }
-
-    tuple<string, string> operating_system_resolver::parse_release(string const& name, string const& release) const
-    {
-        string major, minor;
-        re_search(release, boost::regex("^(\\d+)(?:_u|\\.)(\\d+)"), &major, &minor);
-        return make_tuple(major, minor);
     }
 
 }}}  // namespace facter::facts::solaris

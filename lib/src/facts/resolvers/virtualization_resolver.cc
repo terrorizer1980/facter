@@ -45,4 +45,26 @@ namespace facter { namespace facts { namespace resolvers {
         return hypervisors.count(hypervisor) == 0;
     }
 
+    string virtualization_resolver::get_product_name_vm(string const& product_name)
+    {
+        static vector<tuple<string, string>> vms = {
+            make_tuple("VMware",            string(vm::vmware)),
+            make_tuple("VirtualBox",        string(vm::virtualbox)),
+            make_tuple("Parallels",         string(vm::parallels)),
+            make_tuple("KVM",               string(vm::kvm)),
+            make_tuple("Virtual Machine",   string(vm::hyperv)),
+            make_tuple("RHEV Hypervisor",   string(vm::redhat_ev)),
+            make_tuple("oVirt Node",        string(vm::ovirt)),
+            make_tuple("HVM domU",          string(vm::xen_hardware)),
+            make_tuple("Bochs",             string(vm::bochs)),
+        };
+
+        for (auto const& vm : vms) {
+            if (product_name.find(get<0>(vm)) != string::npos) {
+                return get<1>(vm);
+            }
+        }
+        return {};
+    }
+
 }}}  // namespace facter::facts::resolvers

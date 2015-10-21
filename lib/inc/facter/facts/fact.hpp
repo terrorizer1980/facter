@@ -619,9 +619,34 @@ namespace facter { namespace facts {
         constexpr static char const* path = "path";
 
         /**
-         * The facts for cpu load average.
+         * The fact for cpu load average.
          */
-        constexpr static char const* load_averages    = "load_averages";
+        constexpr static char const* load_averages = "load_averages";
+
+        /**
+         * The fact for augeas metadata.
+         */
+        constexpr static char const* augeas = "augeas";
+
+        /**
+         * The fact for augeas version.
+         */
+        constexpr static char const* augeasversion = "augeasversion";
+
+        /**
+         * The fact for Xen metadata.
+         */
+        constexpr static char const* xen = "xen";
+
+        /**
+         * The fact for Xen domains.
+         */
+        constexpr static char const* xendomains = "xendomains";
+
+        /**
+         * The structured fact for Solaris LDom facts.
+         */
+        constexpr static char const* ldom = "ldom";
     };
 
 }}  // namespace facter::facts

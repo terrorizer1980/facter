@@ -31,6 +31,23 @@ architecture:
     caveats: |
         Linux: Debian, Gentoo, kFreeBSD, and Ubuntu use "amd64" for "x86_64" and Gentoo uses "x86" for "i386".
 
+augeas:
+    type: map
+    description: Return information about augeas.
+    resolution: |
+        All platforms: query augparse for augeas metadata.
+    elements:
+        version:
+            type: string
+            description: The version of augparse.
+
+augeasversion:
+    type: string
+    hidden: true
+    description: Return the version of augeas.
+    resolution: |
+        All platforms: query augparse for the augeas version.
+
 blockdevices:
     type: string
     hidden: true
@@ -305,6 +322,16 @@ ec2_userdata:
     caveats: |
         All platforms: `libfacter` must be built with `libcurl` support.
 
+env_windows_installdir:
+    type: string
+    description: Return the path of the directory in which Puppet was installed.
+    resolution: |
+      Windows: This fact is specific to the Windows MSI generated environment, and is
+        set using the `environment.bat` script that configures the runtime environment
+        for all Puppet executables. Please see [the original commit in the puppet_for_the_win repo](https://github.com/puppetlabs/puppet_for_the_win/commit/0cc32c1a09550c13d725b200d3c0cc17d93ec262) for more information.
+    caveats: |
+      This fact is specific to Windows, and will not resolve on any other platform.
+
 facterversion:
     type: string
     description: Return the version of facter.
@@ -487,6 +514,21 @@ kernelversion:
     resolution: |
         POSIX platforms: use the `uname` function to retrieve the kernel's version.
         Windows: use the file version of `kernel32.dll` to retrieve the kernel's version.
+
+ldom:
+    type: map
+    description: Return Solaris LDom information from the `virtinfo` utility.
+    resolution: |
+        Solaris: use the `virtinfo` utility to retrieve LDom information.
+    validate: false
+
+ldom_<name>:
+    pattern: ^ldom_.+$
+    hidden: true
+    type: string
+    description: Return Solaris LDom information.
+    resolution: |
+        Solaris: use the `virtinfo` utility to retrieve LDom information.
 
 load_averages:
     type: map
@@ -912,6 +954,12 @@ networking:
                     type: map
                     description: Represents a network interface.
                     elements:
+                        bindings:
+                            type: array
+                            description: The array of IPv4 address bindings for the interface.
+                        bindings6:
+                            type: array
+                            description: The array of IPv6 address bindings for the interface.
                         dhcp:
                             type: ip
                             description: The DHCP server for the network interface.
@@ -963,6 +1011,9 @@ networking:
         network6:
             type: ip6
             description: The IPv6 network of the default network interface.
+        primary:
+            type: string
+            description: The name of the primary interface.
 
 operatingsystem:
     type: string
@@ -1161,6 +1212,9 @@ partitions:
                 uuid:
                     type: string
                     description: The unique identifier of a partition.
+                backing_file:
+                    type: string
+                    description: The path to the file backing the partition.
 
 path:
     type: string
@@ -1688,6 +1742,27 @@ virtual:
         Solaris: use the `zonename` utility to retrieve virtual machine name.
         Windows: use WMI to retrieve virtual machine name.
 
+xen:
+    type: map
+    description: Return metadata for the Xen hypervisor.
+    resolution: |
+        POSIX platforms: use `/usr/lib/xen-common/bin/xen-toolstack` to locate xen admin commands if available, otherwise fallback to `/usr/sbin/xl` or `/usr/sbin/xm`. Use the found command to execute the `list` query.
+    caveats: |
+        POSIX platforms: confined to Xen privileged virtual machines.
+    elements:
+        domains:
+            type: array
+            description: list of strings identifying active Xen domains.
+
+xendomains:
+    type: string
+    hidden: true
+    description: Return a list of comma-separated active Xen domain names.
+    resolution: |
+        POSIX platforms: see the `xen` structured fact.
+    caveats: |
+        POSIX platforms: confined to Xen privileged virtual machines.
+
 zfs_featurenumbers:
     type: string
     description: Return the comma-delimited feature numbers for ZFS.
@@ -1705,7 +1780,7 @@ zfs_version:
         Solaris: the `zfs` utility must be present.
 
 zone_<name>_brand:
-    pattern: ^zone_\w+_brand$
+    pattern: ^zone_[\w\-\.]+_brand$
     type: string
     hidden: true
     description: Return the brand for the Solaris zone.
@@ -1715,7 +1790,7 @@ zone_<name>_brand:
         Solaris: the `zoneadm` utility must be present.
 
 zone_<name>_iptype:
-    pattern: ^zone_\w+_iptype$
+    pattern: ^zone_[\w\-\.]+_iptype$
     type: string
     hidden: true
     description: Return the IP type for the Solaris zone.
@@ -1725,7 +1800,7 @@ zone_<name>_iptype:
         Solaris: the `zoneadm` utility must be present.
 
 zone_<name>_name:
-    pattern: ^zone_\w+_name$
+    pattern: ^zone_[\w\-\.]+_name$
     type: string
     hidden: true
     description: Return the name for the Solaris zone.
@@ -1735,7 +1810,7 @@ zone_<name>_name:
         Solaris: the `zoneadm` utility must be present.
 
 zone_<name>_uuid:
-    pattern: ^zone_\w+_uuid$
+    pattern: ^zone_[\w\-\.]+_uuid$
     type: string
     hidden: true
     description: Return the unique identifier for the Solaris zone.
@@ -1745,7 +1820,7 @@ zone_<name>_uuid:
         Solaris: the `zoneadm` utility must be present.
 
 zone_<name>_id:
-    pattern: ^zone_\w+_id$
+    pattern: ^zone_[\w\-\.]+_id$
     type: string
     hidden: true
     description: Return the zone identifier for the Solaris zone.
@@ -1755,7 +1830,7 @@ zone_<name>_id:
         Solaris: the `zoneadm` utility must be present.
 
 zone_<name>_path:
-    pattern: ^zone_\w+_path$
+    pattern: ^zone_[\w\-\.]+_path$
     type: string
     hidden: true
     description: Return the zone path for the Solaris zone.
@@ -1765,7 +1840,7 @@ zone_<name>_path:
         Solaris: the `zoneadm` utility must be present.
 
 zone_<name>_status:
-    pattern: ^zone_\w+_status$
+    pattern: ^zone_[\w\-\.]+_status$
     type: string
     hidden: true
     description: Return the zone state for the Solaris zone.

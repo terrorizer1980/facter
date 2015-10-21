@@ -1,9 +1,9 @@
 #include <internal/facts/posix/processor_resolver.hpp>
-#include <facter/execution/execution.hpp>
+#include <leatherman/execution/execution.hpp>
 #include <leatherman/logging/logging.hpp>
 
 using namespace std;
-using namespace facter::execution;
+using namespace leatherman::execution;
 
 namespace facter { namespace facts { namespace posix {
 
@@ -12,9 +12,9 @@ namespace facter { namespace facts { namespace posix {
         data result;
 
         // Unfortunately there's no corresponding member in utsname for "processor", so we need to spawn
-        auto output = execute("uname", { "-p" });
-        if (output.first) {
-            result.isa = output.second;
+        auto exec = execute("uname", { "-p" });
+        if (exec.success) {
+            result.isa = exec.output;
         }
         return result;
     }

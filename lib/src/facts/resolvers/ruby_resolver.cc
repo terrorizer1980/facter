@@ -1,15 +1,13 @@
 #include <internal/facts/resolvers/ruby_resolver.hpp>
-#include <internal/ruby/api.hpp>
 #include <facter/facts/collection.hpp>
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include <leatherman/ruby/api.hpp>
 #include <leatherman/logging/logging.hpp>
-#include <boost/algorithm/string.hpp>
 
 using namespace std;
-using namespace facter::util;
-using namespace facter::ruby;
+using namespace leatherman::ruby;
 
 namespace facter { namespace facts { namespace resolvers {
 
@@ -82,14 +80,14 @@ namespace facter { namespace facts { namespace resolvers {
     {
         data rb_data;
 
-        auto const* ruby = api::instance();
-        if (!ruby || !ruby->initialized()) {
+        auto const& ruby = api::instance();
+        if (!ruby.initialized()) {
             return rb_data;
         }
 
-        rb_data.platform = get_platform(*ruby);
-        rb_data.sitedir = get_sitedir(*ruby);
-        rb_data.version = get_version(*ruby);
+        rb_data.platform = get_platform(ruby);
+        rb_data.sitedir = get_sitedir(ruby);
+        rb_data.version = get_version(ruby);
 
         return rb_data;
     }

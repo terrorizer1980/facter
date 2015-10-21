@@ -1,111 +1,30 @@
 #include <catch.hpp>
 #include <facter/version.h>
-#include <facter/facts/collection.hpp>
 #include <facter/facts/scalar_value.hpp>
-#include <internal/ruby/api.hpp>
-#include <internal/ruby/module.hpp>
 #include <internal/ruby/ruby_value.hpp>
-#include <internal/util/regex.hpp>
-#include <internal/util/scoped_env.hpp>
-#include <leatherman/logging/logging.hpp>
-#include <boost/algorithm/string.hpp>
-#include <boost/log/sinks/sync_frontend.hpp>
-#include <boost/log/sinks/basic_sink_backend.hpp>
-#include <memory>
-#include <vector>
-#include <sstream>
-#include <string>
-#include "../fixtures.hpp"
+#include <leatherman/util/regex.hpp>
+#include <leatherman/util/scoped_env.hpp>
+#include <leatherman/ruby/api.hpp>
+#include "./ruby_helper.hpp"
+#include "../collection_fixture.hpp"
+#include "../log_capture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::ruby;
-using namespace facter::util;
+using namespace facter::logging;
 using namespace facter::testing;
-using namespace leatherman::logging;
-namespace sinks = boost::log::sinks;
-
-class ruby_log_appender :
-    public sinks::basic_formatted_sink_backend<char, sinks::synchronized_feeding>
-{
- public:
-    void consume(boost::log::record_view const& rec, string_type const& msg)
-    {
-        // Strip color codes
-        string_type message = msg;
-        boost::replace_all(message, "\x1B[0;33m", "");
-        boost::replace_all(message, "\x1B[0;36m", "");
-        boost::replace_all(message, "\x1B[0;31m", "");
-        boost::replace_all(message, "\x1B[0m", "");
-
-        stringstream s;
-        s << rec[log_level_attr];
-
-        _messages.push_back({s.str(), message});
-    }
-
-    vector<pair<string, string>> const& messages() const { return _messages; }
-
- private:
-    vector<pair<string, string>> _messages;
-};
-
-bool load_custom_fact(string const& filename, collection& facts)
-{
-    auto ruby = api::instance();
-
-    module mod(facts);
-
-    string file = LIBFACTER_TESTS_DIRECTORY "/fixtures/ruby/" + filename;
-    VALUE result = ruby->rescue([&]() {
-        // Do not construct C++ objects in a rescue callback
-        // C++ stack unwinding will not take place if a Ruby exception is thrown!
-        ruby->rb_load(ruby->utf8_value(file), 0);
-        return ruby->true_value();
-    }, [&](VALUE ex) {
-        LOG_ERROR("error while resolving custom facts in %1%: %2%", file, ruby->exception_to_string(ex));
-        return ruby->false_value();
-    });
-
-    mod.resolve_facts();
-
-    return ruby->is_true(result);
-}
-
-string ruby_value_to_string(value const* value)
-{
-    ostringstream ss;
-    if (value) {
-        value->write(ss);
-    }
-    return ss.str();
-}
-
-bool has_message(ruby_log_appender& appender, string const& level, string const& pattern)
-{
-    auto const& messages = appender.messages();
-    return find_if(messages.begin(), messages.end(), [&](pair<string, string> const& m) {
-        return m.first == level && re_search(m.second, boost::regex(pattern));
-    }) != messages.end();
-}
+using namespace leatherman::util;
+using namespace leatherman::ruby;
 
 SCENARIO("custom facts written in Ruby") {
-    // Setup logging for the tests
-    set_level(log_level::debug);
-    boost::shared_ptr<ruby_log_appender> appender(new ruby_log_appender());
-    boost::shared_ptr<sinks::synchronous_sink<ruby_log_appender>> sink(new sinks::synchronous_sink<ruby_log_appender>(appender));
-    auto core = boost::log::core::get();
-    core->set_filter(log_level_attr >= log_level::fatal);
-    core->add_sink(sink);
-
-    collection facts;
-    REQUIRE(facts.size() == 0);
+    collection_fixture facts;
+    REQUIRE(facts.size() == 0u);
 
     // Setup ruby
-    auto ruby = api::instance();
-    REQUIRE(ruby);
-    REQUIRE(ruby->initialized());
-    ruby->include_stack_trace(true);
+    auto& ruby = api::instance();
+    REQUIRE(ruby.initialized());
+    ruby.include_stack_trace(true);
 
     GIVEN("a fact that resolves to nil") {
         REQUIRE(load_custom_fact("nil_fact.rb", facts));
@@ -140,10 +59,12 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("a fact with an empty command") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("empty_command.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "expected a non-empty String for first argument"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* expected a non-empty String for first argument")));
         }
     }
     GIVEN("a fact with a command") {
@@ -295,10 +216,12 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("a file with a syntax error") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("bad_syntax.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "undefined method `foo' for Facter:Module"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* undefined method `foo' for Facter:Module")));
         }
     }
     GIVEN("a fact with weighted resolutions") {
@@ -383,44 +306,54 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("a fact that logs debug messages") {
-        core->set_filter(log_level_attr >= log_level::debug);
+        log_capture capture(level::debug);
         REQUIRE(load_custom_fact("debug.rb", facts));
         THEN("the messages should be logged") {
-            REQUIRE(has_message(*appender, "DEBUG", "^message1$"));
-            REQUIRE(has_message(*appender, "DEBUG", "^message2$"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - message1")));
+            REQUIRE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - message2")));
         }
     }
     GIVEN("a fact that logs debug messages only once") {
-        core->set_filter(log_level_attr >= log_level::debug);
+        log_capture capture(level::debug);
         REQUIRE(load_custom_fact("debugonce.rb", facts));
         THEN("the messages should be logged") {
-            REQUIRE(has_message(*appender, "DEBUG", "^unique debug1$"));
-            REQUIRE(has_message(*appender, "DEBUG", "^unique debug2$"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - unique debug1")));
+            REQUIRE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - unique debug2")));
         }
     }
     GIVEN("a fact that logs warning messages") {
-        core->set_filter(log_level_attr >= log_level::warning);
+        log_capture capture(level::warning);
         REQUIRE(load_custom_fact("warn.rb", facts));
         THEN("the messages should be logged") {
-            REQUIRE(has_message(*appender, "WARN", "^message1$"));
-            REQUIRE(has_message(*appender, "WARN", "^message2$"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("WARN  puppetlabs\\.facter - message1")));
+            REQUIRE(re_search(output, boost::regex("WARN  puppetlabs\\.facter - message2")));
         }
     }
     GIVEN("a fact that logs warning messages only once") {
-        core->set_filter(log_level_attr >= log_level::warning);
+        log_capture capture(level::warning);
         REQUIRE(load_custom_fact("warnonce.rb", facts));
         THEN("the messages should be logged") {
-            REQUIRE(has_message(*appender, "WARN", "^unique warning1$"));
-            REQUIRE(has_message(*appender, "WARN", "^unique warning2$"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("WARN  puppetlabs\\.facter - unique warning1")));
+            REQUIRE(re_search(output, boost::regex("WARN  puppetlabs\\.facter - unique warning2")));
         }
     }
     GIVEN("a fact that logs an exception") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE(load_custom_fact("log_exception.rb", facts));
         THEN("an error should be logged") {
-            REQUIRE(has_message(*appender, "ERROR", "^first$"));
-            REQUIRE(has_message(*appender, "ERROR", "^second$"));
-            REQUIRE(has_message(*appender, "ERROR", "^third$"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - first")));
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - second")));
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - third")));
         }
     }
     GIVEN("a fact with a named resolution") {
@@ -436,10 +369,12 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("a fact with a dependency cycle") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE(load_custom_fact("cycle.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "cycle detected while requesting value of fact \"bar\""));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* cycle detected while requesting value of fact \"bar\"")));
         }
     }
     GIVEN("an aggregate resolution with array chunks") {
@@ -455,10 +390,12 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("an aggregate resolution with an invalid require") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("aggregate_invalid_require.rb", facts));
         THEN("the arrays are appended in dependency order") {
-            REQUIRE(has_message(*appender, "ERROR", "expected a Symbol or Array of Symbol for require option"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* expected a Symbol or Array of Symbol for require option")));
         }
     }
     GIVEN("an aggregate resolution with a custom aggregator") {
@@ -474,17 +411,21 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("an aggregate resolution with an invalid require") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE(load_custom_fact("aggregate_with_invalid_merge.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "cannot merge \"hello\":String and \"world\":String"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* cannot merge \"hello\":String and \"world\":String")));
         }
     }
     GIVEN("an aggregate resolution with a cycle") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE(load_custom_fact("aggregate_with_cycle.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "chunk dependency cycle detected"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs.facter - .* chunk dependency cycle detected")));
         }
     }
     GIVEN("a fact with a defined aggregate resolution") {
@@ -494,24 +435,30 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("an aggregate resolution when a simple resolution already exists") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("existing_simple_resolution.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "cannot define an aggregate resolution with name \"bar\": a simple resolution with the same name already exists"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* cannot define an aggregate resolution with name \"bar\": a simple resolution with the same name already exists")));
         }
     }
     GIVEN("a simple resolution when an aggregate resolution already exists") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("existing_aggregate_resolution.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "cannot define a simple resolution with name \"bar\": an aggregate resolution with the same name already exists"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* cannot define a simple resolution with name \"bar\": an aggregate resolution with the same name already exists")));
         }
     }
     GIVEN("a custom fact that logs the facter version") {
-        core->set_filter(log_level_attr >= log_level::debug);
+        log_capture capture(level::debug);
         REQUIRE(load_custom_fact("version.rb", facts));
         THEN("the expected version is logged") {
-            REQUIRE(has_message(*appender, "DEBUG", LIBFACTER_VERSION));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - " + (boost::format("%1%\\.%2%\\.%3%") % LIBFACTER_VERSION_MAJOR % LIBFACTER_VERSION_MINOR % LIBFACTER_VERSION_PATCH).str())));
         }
     }
     GIVEN("a fact resolution that uses Facter::Core::Execution#exec") {
@@ -521,10 +468,12 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("Facter::Core::Execution#execute with on_fail => :raise") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("execute_on_fail_raise.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "execution of command \"not a command\" failed"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* execution of command \"not a command\" failed")));
         }
     }
     GIVEN("a fact resolution that uses Facter::Core::Execution#execute with a default value") {
@@ -534,41 +483,49 @@ SCENARIO("custom facts written in Ruby") {
         }
     }
     GIVEN("a fact resolution that uses Facter::Core::Execution#execute with a timeout") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE_FALSE(load_custom_fact("execute_timeout.rb", facts));
         THEN("an error is logged") {
-            REQUIRE(has_message(*appender, "ERROR", "command timed out after 1 seconds."));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* command timed out after 1 seconds")));
         }
     }
     GIVEN("a fact that uses timeout") {
-        core->set_filter(log_level_attr >= log_level::warning);
+        log_capture capture(level::warning);
         REQUIRE(load_custom_fact("timeout.rb", facts));
         THEN("a warning is logged") {
-            REQUIRE(has_message(*appender, "WARN", "timeout option is not supported for custom facts and will be ignored."));
-            REQUIRE(has_message(*appender, "WARN", "timeout= is not supported for custom facts and will be ignored."));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("WARN  puppetlabs\\.facter - timeout option is not supported for custom facts and will be ignored.$")));
+            REQUIRE(re_search(output, boost::regex("WARN  puppetlabs\\.facter - timeout= is not supported for custom facts and will be ignored.$")));
         }
     }
     GIVEN("a fact that uses Facter#trace to enable backtraces") {
-        core->set_filter(log_level_attr >= log_level::error);
+        log_capture capture(level::error);
         REQUIRE(load_custom_fact("trace.rb", facts));
         THEN("backtraces are logged") {
-            REQUIRE(has_message(*appender, "ERROR", "^first$"));
-            REQUIRE(has_message(*appender, "ERROR", "^second\\nbacktrace:"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - first")));
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - second\\nbacktrace:")));
         }
     }
     GIVEN("a fact that uses Facter#debugging to enable debug messages") {
-        core->set_filter(log_level_attr >= log_level::debug);
+        log_capture capture(level::debug);
         REQUIRE(load_custom_fact("debugging.rb", facts));
         THEN("debug message is logged") {
-            REQUIRE(has_message(*appender, "DEBUG", "^yep$"));
-            REQUIRE_FALSE(has_message(*appender, "DEBUG", "^nope$"));
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - yep")));
+            REQUIRE_FALSE(re_search(output, boost::regex("DEBUG puppetlabs\\.facter - nope")));
         }
     }
     GIVEN("a custom on_message block") {
-        core->set_filter(log_level_attr >= log_level::debug);
+        log_capture capture(level::debug);
         REQUIRE(load_custom_fact("on_message.rb", facts));
         THEN("no messages are logged") {
-            REQUIRE(appender->messages().empty());
+            REQUIRE(capture.result().empty());
         }
     }
     GIVEN("a custom fact with a higher weight than a built-in fact") {
@@ -596,9 +553,64 @@ SCENARIO("custom facts written in Ruby") {
             REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "{\n  foo => \"bar\"\n}");
         }
     }
-
-    // Cleanup
-    set_level(log_level::none);
-    core->reset_filter();
-    core->remove_sink(sink);
+    GIVEN("a fact that requires facter") {
+        REQUIRE(load_custom_fact("facter.rb", facts));
+        THEN("the require succeeds") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "\"bar\"");
+        }
+    }
+    GIVEN("a fact that has 100 resolutions") {
+        REQUIRE(load_custom_fact("100_resolutions.rb", facts));
+        THEN("the fact evaluates") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "\"bar\"");
+        }
+    }
+    GIVEN("a fact that has 101 resolutions") {
+        log_capture capture(level::error);
+        REQUIRE_FALSE(load_custom_fact("101_resolutions.rb", facts));
+        THEN("an error is logged") {
+            auto output = capture.result();
+            CAPTURE(output);
+            REQUIRE(re_search(output, boost::regex("ERROR puppetlabs\\.facter - .* fact \"foo\" already has the maximum number of resolutions allowed \\(100\\)")));
+        }
+    }
+    GIVEN("a fact that runs a command outputting to stderr") {
+        REQUIRE(load_custom_fact("stderr_output.rb", facts));
+        THEN("the values should only contain stdout output") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("first")) == "\"bar\"");
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("second")) == "\"bar\"");
+        }
+    }
+    GIVEN("a fact that runs a setcode command that returns no output") {
+        REQUIRE(load_custom_fact("empty_setcode_command.rb", facts));
+        THEN("the fact should not resolve") {
+            REQUIRE_FALSE(facts["foo"]);
+        }
+    }
+    GIVEN("a fact that runs executes nonexistent commands") {
+        REQUIRE(load_custom_fact("nonexistent_command.rb", facts));
+        THEN("the fact should not resolve") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("first")) == "\"pass\"");
+            REQUIRE_FALSE(facts["second"]);
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("third")) == "\"pass\"");
+        }
+    }
+    GIVEN("a fact that executes a command that returns non-zero") {
+        REQUIRE(load_custom_fact("execution_failure.rb", facts));
+        THEN("the fact value should be the command's output") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "\"bar\"");
+        }
+    }
+    GIVEN("a built-in fact requested multiple times") {
+        REQUIRE(load_custom_fact("single_allocation.rb", facts));
+        THEN("the value should be properly cached between Facter.value calls") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "true");
+        }
+    }
+    GIVEN("a fact that returns a negative number") {
+        REQUIRE(load_custom_fact("negative_number.rb", facts));
+        THEN("the value should be output as a signed value") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "-101");
+        }
+    }
 }

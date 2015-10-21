@@ -126,6 +126,10 @@ namespace facter { namespace facts {
          */
         constexpr static char const* archlinux = "Archlinux";
         /**
+         * The Manjaro Linux operating system.
+         */
+        constexpr static char const* manjarolinux = "ManjaroLinux";
+        /**
          * The Mandrake Linux operating system.
          */
         constexpr static char const* mandrake = "Mandrake";
@@ -177,6 +181,10 @@ namespace facter { namespace facts {
          * The Windows operating system.
          */
         constexpr static char const* windows = "windows";
+        /**
+         * The AristaEOS operating system.
+         */
+        constexpr static char const* arista_eos = "AristaEOS";
     };
 
 }}

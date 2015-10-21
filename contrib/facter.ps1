@@ -52,11 +52,14 @@ if ($arch -eq 64) {
 }
 $mingwVer = "${mingwArch}_mingw-w64_${mingwVerNum}_${mingwThreads}_${mingwExceptions}"
 
-$boostVer = "boost_1_55_0"
+$boostVer = "boost_1_58_0"
 $boostPkg = "${boostVer}-${mingwVer}"
 
 $yamlCppVer = "yaml-cpp-0.5.1"
 $yamlPkg = "${yamlCppVer}-${mingwVer}"
+
+$curlVer = "curl-7.42.1"
+$curlPkg = "${curlVer}-${mingwVer}"
 
 ### Setup, build, and install
 ## Install Chocolatey, then use it to install required tools.
@@ -74,18 +77,18 @@ if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
     iex ((new-object net.webclient).DownloadString('https://chocolatey.org/install.ps1'))
 }
 Install-Choco 7zip.commandline 9.20.0.20150210
-Install-Choco cmake 3.0.2.20150210
-Install-Choco git.install 1.9.5.20150210
+Install-Choco cmake 3.2.2
+Install-Choco git.install 1.9.5.20150320
 
 # For MinGW, we expect specific project defaults
 # - win32 threads, for Windows Server 2003 support
 # - seh exceptions on 64-bit, to work around an obscure bug loading Ruby in Facter
 # These are the defaults on our myget feed.
 if ($arch -eq 64) {
-  Install-Choco ruby 2.1.5.20150210
+  Install-Choco ruby 2.1.6
   Install-Choco mingw-w64 $mingwVerChoco
 } else {
-  Install-Choco ruby 2.1.5.20150210 @('-x86')
+  Install-Choco ruby 2.1.6 @('-x86')
   Install-Choco mingw-w32 $mingwVerChoco @('-x86')
 }
 $env:PATH = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
@@ -119,14 +122,28 @@ if ($buildSource) {
     'toolset=gcc',
     "--build-type=minimal",
     "install",
-    "--with-program_options",
-    "--with-system",
-    "--with-filesystem",
+    '--with-atomic',
+    "--with-chrono",
+    '--with-container',
     "--with-date_time",
-    "--with-thread",
-    "--with-regex",
-    "--with-log",
+    '--with-exception',
+    "--with-filesystem",
+    '--with-graph',
+    '--with-graph_parallel',
+    '--with-iostreams',
     "--with-locale",
+    "--with-log",
+    '--with-math',
+    "--with-program_options",
+    "--with-random",
+    "--with-regex",
+    '--with-serialization',
+    '--with-signals',
+    "--with-system",
+    '--with-test',
+    "--with-thread",
+    '--with-timer',
+    '--with-wave',
     "--prefix=`"$toolsDir\$boostPkg`"",
     "boost.locale.iconv=off"
     "-j$cores"
@@ -151,6 +168,18 @@ if ($buildSource) {
   )
   cmake $args
   mingw32-make install -j $cores
+  cd $toolsDir
+
+  (New-Object net.webclient).DownloadFile("http://curl.haxx.se/download/${curlVer}.zip", "$toolsDir\${curlVer}.zip")
+  & 7za x "${curlVer}.zip" | FIND /V "ing "
+  cd $curlVer
+
+  mingw32-make mingw32
+  mkdir -Path $toolsDir\$curlPkg\include
+  cp -r include\curl $toolsDir\$curlPkg\include
+  mkdir -Path $toolsDir\$curlPkg\lib
+  cp lib\libcurl.a $toolsDir\$curlPkg\lib
+  cd $toolsDir
 } else {
   ## Download and unpack Boost from a pre-built package in S3
   (New-Object net.webclient).DownloadFile("https://s3.amazonaws.com/kylo-pl-bucket/${boostPkg}.7z", "$toolsDir\${boostPkg}.7z")
@@ -159,6 +188,10 @@ if ($buildSource) {
   ## Download and unpack yaml-cpp from a pre-built package in S3
   (New-Object net.webclient).DownloadFile("https://s3.amazonaws.com/kylo-pl-bucket/${yamlPkg}.7z", "$toolsDir\${yamlPkg}.7z")
   & 7za x "${yamlPkg}.7z" | FIND /V "ing "
+
+  ## Download and unpack curl from a pre-built package in S3
+  (New-Object net.webclient).DownloadFile("https://s3.amazonaws.com/kylo-pl-bucket/${curlPkg}.7z", "$toolsDir\${curlPkg}.7z")
+  & 7za x "${curlPkg}.7z" | FIND /V "ing "
 }
 
 ## Build Facter
@@ -169,6 +202,8 @@ $args = @(
   "-DBOOST_ROOT=`"$toolsDir\$boostPkg`"",
   "-DBOOST_STATIC=ON",
   "-DYAMLCPP_ROOT=`"$toolsDir\$yamlPkg`"",
+  "-DCMAKE_PREFIX_PATH=`"$toolsDir\$curlPkg`"",
+  "-DCURL_STATIC=ON",
   ".."
 )
 cmake $args

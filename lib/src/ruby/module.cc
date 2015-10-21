@@ -1,13 +1,14 @@
 #include <internal/ruby/module.hpp>
-#include <internal/ruby/api.hpp>
 #include <internal/ruby/aggregate_resolution.hpp>
 #include <internal/ruby/confine.hpp>
 #include <internal/ruby/simple_resolution.hpp>
 #include <facter/facts/collection.hpp>
-#include <facter/util/directory.hpp>
-#include <facter/execution/execution.hpp>
+#include <facter/logging/logging.hpp>
 #include <facter/version.h>
 #include <facter/export.h>
+#include <leatherman/util/environment.hpp>
+#include <leatherman/execution/execution.hpp>
+#include <leatherman/file_util/directory.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
@@ -15,14 +16,19 @@
 #include <boost/nowide/convert.hpp>
 #include <stdexcept>
 #include <functional>
+#include <facter/facts/scalar_value.hpp>
+#include <facter/facts/array_value.hpp>
+#include <facter/facts/map_value.hpp>
+#include <internal/ruby/ruby_value.hpp>
 
 using namespace std;
 using namespace facter::facts;
-using namespace facter::util;
-using namespace facter::execution;
+using namespace leatherman::execution;
+using namespace leatherman::file_util;
+using namespace leatherman::util;
 using namespace boost::filesystem;
-
 using namespace leatherman::logging;
+using namespace leatherman::ruby;
 
 namespace facter { namespace ruby {
 
@@ -43,7 +49,7 @@ namespace facter { namespace ruby {
             // Ruby doesn't have a proper way of notifying extensions that the VM is shutting down
             // The easiest way to get notified is to have a global data object that never gets collected
             // until the VM shuts down
-            auto const& ruby = *api::instance();
+            auto const& ruby = api::instance();
             _canary = ruby.rb_data_object_alloc(*ruby.rb_cObject, this, nullptr, cleanup);
             ruby.rb_gc_register_address(&_canary);
             ruby.register_data_object(_canary);
@@ -58,7 +64,7 @@ namespace facter { namespace ruby {
             _facts.reset();
 
             // Remove the finalizer and let Ruby collect the object
-            auto const& ruby = *api::instance();
+            auto const& ruby = api::instance();
             ruby.rb_gc_unregister_address(&_canary);
             ruby.unregister_data_object(_canary);
         }
@@ -107,18 +113,47 @@ extern "C" {
      */
     void LIBFACTER_EXPORT Init_libfacter()
     {
-        setup_logging(boost::nowide::cerr);
-        set_level(log_level::warning);
+        bool logging_init_failed = false;
+        string logging_init_error_msg;
+        try {
+            facter::logging::setup_logging(boost::nowide::cerr);
+            set_level(log_level::warning);
+        } catch(facter::logging::locale_error const& e) {
+            logging_init_failed = true;
+            logging_init_error_msg = e.what();
+        }
 
         // Initialize ruby
-        auto ruby = facter::ruby::api::instance();
-        if (!ruby) {
+        api* ruby = nullptr;
+        try {
+            ruby = &api::instance();
+        } catch (runtime_error& ex) {
+            if (!logging_init_failed) {
+                LOG_WARNING("%1%: facts requiring Ruby will not be resolved.", ex.what());
+            } else {
+                // This could only happen if some non-ruby library
+                // consumer called this function for some reason and
+                // we didn't have a libruby loaded. AND the locales
+                // are messed up so badly that even resetting locale
+                // environment variables fails. This seems so
+                // astronomically unlikely that I don't really think
+                // it's worth figuring out what we should do in this
+                // case - I'm honestly not even sure there's a correct
+                // behavior at this point.
+                // -- Branan
+            }
             return;
         }
+
         ruby->initialize();
 
-        // Create the context
-        facter::ruby::require_context::create();
+        // If logging init failed, we'll raise a load error
+        // here. Otherwise we Create the context
+        if (logging_init_failed) {
+            ruby->rb_raise(*ruby->rb_eLoadError, "could not initialize facter due to a locale error: %s", logging_init_error_msg.c_str());
+        } else {
+            facter::ruby::require_context::create();
+        }
     }
 }
 
@@ -126,14 +161,11 @@ namespace facter { namespace ruby {
 
     map<VALUE, module*> module::_instances;
 
-    module::module(collection& facts, vector<string> const& paths) :
+    module::module(collection& facts, vector<string> const& paths, bool logging_hooks) :
         _collection(facts),
         _loaded_all(false)
     {
-        if (!api::instance()) {
-            throw runtime_error("Ruby API is not present.");
-        }
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         if (!ruby.initialized()) {
             throw runtime_error("Ruby API is not initialized.");
         }
@@ -147,7 +179,8 @@ namespace facter { namespace ruby {
 
         // Install a logging message handler
         on_message([this](log_level level, string const& message) {
-            auto const& ruby = *api::instance();
+            auto const& ruby = api::instance();
+
             if (ruby.is_nil(_on_message_block)) {
                 return true;
             }
@@ -163,14 +196,6 @@ namespace facter { namespace ruby {
             });
             return false;
         });
-
-        // Undefine Facter if it's already defined
-        ruby.rb_gc_register_address(&_previous_facter);
-        if (ruby.is_true(ruby.rb_const_defined(*ruby.rb_cObject, ruby.rb_intern("Facter")))) {
-            _previous_facter = ruby.rb_const_remove(*ruby.rb_cObject, ruby.rb_intern("Facter"));
-        } else {
-            _previous_facter = ruby.nil_value();
-        }
 
         // Define the Facter module
         _self = ruby.rb_define_module("Facter");
@@ -194,9 +219,7 @@ namespace facter { namespace ruby {
         ruby.rb_define_singleton_method(_self, "warn", RUBY_METHOD_FUNC(ruby_warn), 1);
         ruby.rb_define_singleton_method(_self, "warnonce", RUBY_METHOD_FUNC(ruby_warnonce), 1);
         ruby.rb_define_singleton_method(_self, "log_exception", RUBY_METHOD_FUNC(ruby_log_exception), -1);
-        ruby.rb_define_singleton_method(_self, "debugging", RUBY_METHOD_FUNC(ruby_set_debugging), 1);
         ruby.rb_define_singleton_method(_self, "debugging?", RUBY_METHOD_FUNC(ruby_get_debugging), 0);
-        ruby.rb_define_singleton_method(_self, "trace", RUBY_METHOD_FUNC(ruby_set_trace), 1);
         ruby.rb_define_singleton_method(_self, "trace?", RUBY_METHOD_FUNC(ruby_get_trace), 0);
         ruby.rb_define_singleton_method(_self, "flush", RUBY_METHOD_FUNC(ruby_flush), 0);
         ruby.rb_define_singleton_method(_self, "list", RUBY_METHOD_FUNC(ruby_list), 0);
@@ -209,30 +232,32 @@ namespace facter { namespace ruby {
         ruby.rb_define_singleton_method(_self, "search_path", RUBY_METHOD_FUNC(ruby_search_path), 0);
         ruby.rb_define_singleton_method(_self, "search_external", RUBY_METHOD_FUNC(ruby_search_external), 1);
         ruby.rb_define_singleton_method(_self, "search_external_path", RUBY_METHOD_FUNC(ruby_search_external_path), 0);
-        ruby.rb_define_singleton_method(_self, "on_message", RUBY_METHOD_FUNC(ruby_on_message), 0);
+
+        // Only define these if requested to do so
+        // This prevents consumers of Facter from altering the logging behavior
+        if (logging_hooks) {
+            ruby.rb_define_singleton_method(_self, "debugging", RUBY_METHOD_FUNC(ruby_set_debugging), 1);
+            ruby.rb_define_singleton_method(_self, "trace", RUBY_METHOD_FUNC(ruby_set_trace), 1);
+            ruby.rb_define_singleton_method(_self, "on_message", RUBY_METHOD_FUNC(ruby_on_message), 0);
+        }
 
         // Define the execution module
         ruby.rb_define_singleton_method(execution, "which", RUBY_METHOD_FUNC(ruby_which), 1);
         ruby.rb_define_singleton_method(execution, "exec", RUBY_METHOD_FUNC(ruby_exec), 1);
         ruby.rb_define_singleton_method(execution, "execute", RUBY_METHOD_FUNC(ruby_execute), -1);
         ruby.rb_define_class_under(execution, "ExecutionFailure", *ruby.rb_eStandardError);
-        ruby.rb_obj_freeze(execution);
 
         // Define the Fact and resolution classes
         fact::define();
         simple_resolution::define();
         aggregate_resolution::define();
 
-        // To prevent custom facts from including parts of Ruby Facter and overriding the above definitions,
-        // grab the first directory on the load path and append certain files to $LOADED_FEATURES
+        // Custom facts may `require 'facter'`
+        // To allow those custom facts to still function, add facter.rb to loaded features using the first directory in the load path
+        // Note: use forward slashes in the path even on Windows because that's what Ruby expects in $LOADED_FEATURES
         volatile VALUE first = ruby.rb_ary_entry(ruby.rb_gv_get("$LOAD_PATH"), 0);
         if (!ruby.is_nil(first)) {
-            volatile VALUE features = ruby.rb_gv_get("$LOADED_FEATURES");
-            path p = ruby.to_string(first);
-            ruby.rb_ary_push(features, ruby.utf8_value((p / "facter.rb").string()));
-            ruby.rb_ary_push(features, ruby.utf8_value((p / "facter" / "util" / "resolution.rb").string()));
-            ruby.rb_ary_push(features, ruby.utf8_value((p / "facter" / "core" / "aggregate.rb").string()));
-            ruby.rb_ary_push(features, ruby.utf8_value((p / "facter" / "core" / "execution.rb").string()));
+            ruby.rb_ary_push(ruby.rb_gv_get("$LOADED_FEATURES"), ruby.utf8_value(ruby.to_string(first) + "/facter.rb"));
         }
     }
 
@@ -242,23 +267,35 @@ namespace facter { namespace ruby {
 
         clear_facts(false);
 
-        auto ruby = api::instance();
-        if (!ruby) {
-            // Ruby has been uninitialized
+        try {
+            api& ruby = api::instance();
+
+            // Unregister the on message block
+            ruby.rb_gc_unregister_address(&_on_message_block);
+            on_message(nullptr);
+
+            // Undefine the module
+            ruby.rb_const_remove(*ruby.rb_cObject, ruby.rb_intern("Facter"));
+        } catch (runtime_error& ex) {
+            LOG_WARNING("%1%: Ruby cleanup ended prematurely", ex.what());
             return;
         }
+    }
 
-        // Unregister the on message block
-        ruby->rb_gc_unregister_address(&_on_message_block);
-        on_message(nullptr);
+    void module::search(vector<string> const& paths)
+    {
+        for (auto dir : paths) {
+            _additional_search_paths.emplace_back(dir);
 
-        // Undefine the module and restore the previous value
-        ruby->rb_const_remove(*ruby->rb_cObject, ruby->rb_intern("Facter"));
-        if (!ruby->is_nil(_previous_facter)) {
-            ruby->rb_const_set(*ruby->rb_cObject, ruby->rb_intern("Facter"), _previous_facter);
+            // Get the canonical directory name
+            boost::system::error_code ec;
+            path directory = canonical(_additional_search_paths.back(), ec);
+            if (ec) {
+                continue;
+            }
+
+            _search_paths.push_back(directory.string());
         }
-
-        ruby->rb_gc_unregister_address(&_previous_facter);
     }
 
     void module::load_facts()
@@ -271,7 +308,7 @@ namespace facter { namespace ruby {
 
         for (auto const& directory : _search_paths) {
             LOG_DEBUG("searching for custom facts in %1%.", directory);
-            directory::each_file(directory, [&](string const& file) {
+            each_file(directory, [&](string const& file) {
                 load_file(file);
                 return true;
             }, "\\.rb$");
@@ -287,7 +324,7 @@ namespace facter { namespace ruby {
 
         load_facts();
 
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         // Get the value from all facts
         for (auto const& kvp : _facts) {
@@ -297,13 +334,11 @@ namespace facter { namespace ruby {
 
     void module::clear_facts(bool clear_collection)
     {
-        auto ruby = api::instance();
+        auto const& ruby = api::instance();
 
         // Unregister all the facts
-        if (ruby) {
-            for (auto& kvp : _facts) {
-                ruby->rb_gc_unregister_address(&kvp.second);
-            }
+        for (auto& kvp : _facts) {
+            ruby.rb_gc_unregister_address(&kvp.second);
         }
 
         // Clear the custom facts
@@ -317,7 +352,7 @@ namespace facter { namespace ruby {
 
     VALUE module::fact_value(VALUE name)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         VALUE fact_self = load_fact(name);
         if (ruby.is_nil(fact_self)) {
@@ -327,9 +362,50 @@ namespace facter { namespace ruby {
         return ruby.to_native<fact>(fact_self)->value();
     }
 
+    VALUE module::to_ruby(value const* val) const
+    {
+        auto const& ruby = api::instance();
+
+        if (!val) {
+            return ruby.nil_value();
+        }
+        if (auto ptr = dynamic_cast<facter::ruby::ruby_value const*>(val)) {
+            return ptr->value();
+        }
+        if (auto ptr = dynamic_cast<string_value const*>(val)) {
+            return ruby.utf8_value(ptr->value());
+        }
+        if (auto ptr = dynamic_cast<integer_value const*>(val)) {
+            return ruby.rb_int2inum(static_cast<SIGNED_VALUE>(ptr->value()));
+        }
+        if (auto ptr = dynamic_cast<boolean_value const*>(val)) {
+            return ptr->value() ? ruby.true_value() : ruby.false_value();
+        }
+        if (auto ptr = dynamic_cast<double_value const*>(val)) {
+            return ruby.rb_float_new_in_heap(ptr->value());
+        }
+        if (auto ptr = dynamic_cast<array_value const*>(val)) {
+            volatile VALUE array = ruby.rb_ary_new_capa(static_cast<long>(ptr->size()));
+            ptr->each([&](value const* element) {
+                ruby.rb_ary_push(array, to_ruby(element));
+                return true;
+            });
+            return array;
+        }
+        if (auto ptr = dynamic_cast<map_value const*>(val)) {
+            volatile VALUE hash = ruby.rb_hash_new();
+            ptr->each([&](string const& name, value const* element) {
+                ruby.rb_hash_aset(hash, ruby.utf8_value(name), to_ruby(element));
+                return true;
+            });
+            return hash;
+        }
+        return ruby.nil_value();
+    }
+
     VALUE module::normalize(VALUE name) const
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (ruby.is_symbol(name)) {
             name = ruby.rb_sym_to_s(name);
@@ -343,34 +419,40 @@ namespace facter { namespace ruby {
     collection& module::facts()
     {
         if (_collection.empty()) {
-            _collection.add_default_facts();
+            bool include_ruby_facts = true;
+            _collection.add_default_facts(include_ruby_facts);
             _collection.add_external_facts(_external_search_paths);
 
-            auto const& ruby = *api::instance();
+            auto const& ruby = api::instance();
             _collection.add_environment_facts([&](string const& name) {
                 // Create a fact and explicitly set the value
                 // We honor environment variables above custom fact resolutions
-                ruby.to_native<fact>(create_fact(ruby.utf8_value(name)))->value(ruby.to_ruby(_collection[name]));
+                ruby.to_native<fact>(create_fact(ruby.utf8_value(name)))->value(to_ruby(_collection[name]));
             });
         }
         return _collection;
     }
 
+    VALUE module::self() const
+    {
+        return _self;
+    }
+
     module* module::current()
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         return from_self(ruby.lookup({"Facter"}));
     }
 
     VALUE module::ruby_version(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         return ruby.lookup({ "Facter", "FACTERVERSION" });
     }
 
     VALUE module::ruby_add(int argc, VALUE* argv, VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (argc == 0 || argc > 2) {
             ruby.rb_raise(*ruby.rb_eArgError, "wrong number of arguments (%d for 2)", argc);
@@ -391,7 +473,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_define_fact(int argc, VALUE* argv, VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (argc == 0 || argc > 2) {
             ruby.rb_raise(*ruby.rb_eArgError, "wrong number of arguments (%d for 2)", argc);
@@ -418,14 +500,14 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_debug(VALUE self, VALUE message)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         LOG_DEBUG(ruby.to_string(message));
         return ruby.nil_value();
     }
 
     VALUE module::ruby_debugonce(VALUE self, VALUE message)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         string msg = ruby.to_string(message);
         if (from_self(self)->_debug_messages.insert(msg).second) {
@@ -436,14 +518,14 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_warn(VALUE self, VALUE message)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         LOG_WARNING(ruby.to_string(message));
         return ruby.nil_value();
     }
 
     VALUE module::ruby_warnonce(VALUE self, VALUE message)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         string msg = ruby.to_string(message);
         if (from_self(self)->_warning_messages.insert(msg).second) {
@@ -454,7 +536,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_set_debugging(VALUE self, VALUE value)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (ruby.is_true(value)) {
             set_level(log_level::debug);
@@ -466,26 +548,26 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_get_debugging(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         return is_enabled(log_level::debug) ? ruby.true_value() : ruby.false_value();
     }
 
     VALUE module::ruby_set_trace(VALUE self, VALUE value)
     {
-        auto& ruby = *api::instance();
+        auto& ruby = api::instance();
         ruby.include_stack_trace(ruby.is_true(value));
         return ruby_get_trace(self);
     }
 
     VALUE module::ruby_get_trace(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         return ruby.include_stack_trace() ? ruby.true_value() : ruby.false_value();
     }
 
     VALUE module::ruby_log_exception(int argc, VALUE* argv, VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (argc == 0 || argc > 2) {
             ruby.rb_raise(*ruby.rb_eArgError, "wrong number of arguments (%d for 2)", argc);
@@ -505,7 +587,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_flush(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         for (auto& kvp : from_self(self)->_facts)
         {
@@ -516,7 +598,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_list(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         instance->resolve_facts();
@@ -532,7 +614,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_to_hash(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         instance->resolve_facts();
@@ -540,7 +622,7 @@ namespace facter { namespace ruby {
         volatile VALUE hash = ruby.rb_hash_new();
 
         instance->facts().each([&](string const& name, value const* val) {
-            ruby.rb_hash_aset(hash, ruby.utf8_value(name), ruby.to_ruby(val));
+            ruby.rb_hash_aset(hash, ruby.utf8_value(name), instance->to_ruby(val));
             return true;
         });
         return hash;
@@ -548,13 +630,13 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_each(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         instance->resolve_facts();
 
         instance->facts().each([&](string const& name, value const* val) {
-            ruby.rb_yield_values(2, ruby.utf8_value(name), ruby.to_ruby(val));
+            ruby.rb_yield_values(2, ruby.utf8_value(name), instance->to_ruby(val));
             return true;
         });
         return self;
@@ -562,7 +644,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_clear(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         ruby_flush(self);
         ruby_reset(self);
@@ -572,7 +654,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_reset(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         instance->clear_facts();
@@ -586,7 +668,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_loadfacts(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         from_self(self)->load_facts();
         return ruby.nil_value();
@@ -594,7 +676,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_search(int argc, VALUE* argv, VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         for (int i = 0; i < argc; ++i) {
@@ -617,7 +699,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_search_path(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         volatile VALUE array = ruby.rb_ary_new_capa(instance->_additional_search_paths.size());
@@ -630,7 +712,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_search_external(VALUE self, VALUE paths)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         ruby.array_for_each(paths, [&](VALUE element) {
@@ -645,7 +727,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_search_external_path(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         module* instance = from_self(self);
 
         volatile VALUE array = ruby.rb_ary_new_capa(instance->_external_search_paths.size());
@@ -659,9 +741,9 @@ namespace facter { namespace ruby {
     VALUE module::ruby_which(VALUE self, VALUE binary)
     {
         // Note: self is Facter::Core::Execution
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
-        string path = execution::which(ruby.to_string(binary));
+        string path = which(ruby.to_string(binary));
         if (path.empty()) {
             return ruby.nil_value();
         }
@@ -672,14 +754,14 @@ namespace facter { namespace ruby {
     VALUE module::ruby_exec(VALUE self, VALUE command)
     {
         // Note: self is Facter::Core::Execution
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
         return execute_command(ruby.to_string(command), ruby.nil_value(), false);
     }
 
     VALUE module::ruby_execute(int argc, VALUE* argv, VALUE self)
     {
         // Note: self is Facter::Core::Execution
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (argc == 0 || argc > 2) {
             ruby.rb_raise(*ruby.rb_eArgError, "wrong number of arguments (%d for 2)", argc);
@@ -709,7 +791,7 @@ namespace facter { namespace ruby {
 
     VALUE module::ruby_on_message(VALUE self)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         from_self(self)->_on_message_block = ruby.rb_block_given_p() ? ruby.rb_block_proc() : ruby.nil_value();
         return ruby.nil_value();
@@ -719,7 +801,7 @@ namespace facter { namespace ruby {
     {
         auto it = _instances.find(self);
         if (it == _instances.end()) {
-            auto const& ruby = *api::instance();
+            auto const& ruby = api::instance();
             ruby.rb_raise(*ruby.rb_eArgError, "unexpected self value %d", self);
             return nullptr;
         }
@@ -728,32 +810,45 @@ namespace facter { namespace ruby {
 
     VALUE module::execute_command(std::string const& command, VALUE failure_default, bool raise, uint32_t timeout)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
-        // Block to ensure that result is destructed before raising.
-        try {
-            auto result = execution::execute(execution::command_shell,
-                {execution::command_args, expand_command(command)},
-                option_set<execution_options> {
-                    execution_options::defaults,
-                    execution_options::redirect_stderr
-                }, timeout);
-            if (result.first) {
-                return ruby.utf8_value(result.second);
+        // Expand the command
+        auto expanded = expand_command(command);
+
+        if (!expanded.empty()) {
+            try {
+                auto exec = execute(
+                    command_shell,
+                    {
+                        command_args,
+                        expanded
+                    },
+                    timeout,
+                    {
+                        execution_options::trim_output,
+                        execution_options::merge_environment,
+                        execution_options::redirect_stderr_to_null,
+                        execution_options::preserve_arguments
+                    });
+                return ruby.utf8_value(exec.output);
+            } catch (timeout_exception const& ex) {
+                // Always raise for timeouts
+                ruby.rb_raise(ruby.lookup({ "Facter", "Core", "Execution", "ExecutionFailure"}), ex.what());
             }
-        } catch (timeout_exception const& ex) {
-            // Always raise for timeouts
-            ruby.rb_raise(ruby.lookup({ "Facter", "Core", "Execution", "ExecutionFailure"}), ex.what());
         }
+        // Command was not found
         if (raise) {
-            ruby.rb_raise(ruby.lookup({ "Facter", "Core", "Execution", "ExecutionFailure"}), "execution of command \"%s\" failed", command.c_str());
+            if (expanded.empty()) {
+                ruby.rb_raise(ruby.lookup({ "Facter", "Core", "Execution", "ExecutionFailure"}), "execution of command \"%s\" failed: command not found.", command.c_str());
+            }
+            ruby.rb_raise(ruby.lookup({ "Facter", "Core", "Execution", "ExecutionFailure"}), "execution of command \"%s\" failed.", command.c_str());
         }
         return failure_default;
     }
 
     void module::initialize_search_paths(vector<string> const& paths)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         _search_paths.clear();
         _additional_search_paths.clear();
@@ -810,7 +905,7 @@ namespace facter { namespace ruby {
 
     VALUE module::load_fact(VALUE name)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         name = normalize(name);
         string fact_name = ruby.to_string(name);
@@ -875,7 +970,7 @@ namespace facter { namespace ruby {
             return;
         }
 
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         LOG_INFO("loading custom facts from %1%.", path);
         ruby.rescue([&]() {
@@ -891,7 +986,7 @@ namespace facter { namespace ruby {
 
     VALUE module::create_fact(VALUE name)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         if (!ruby.is_string(name) && !ruby.is_symbol(name)) {
             ruby.rb_raise(*ruby.rb_eTypeError, "expected a String or Symbol for fact name");
@@ -913,7 +1008,7 @@ namespace facter { namespace ruby {
 
     VALUE module::level_to_symbol(log_level level)
     {
-        auto const& ruby = *api::instance();
+        auto const& ruby = api::instance();
 
         char const* name = nullptr;
 

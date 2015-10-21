@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_memory_resolver : memory_resolver
 {
@@ -34,22 +36,22 @@ struct test_memory_resolver : memory_resolver
 };
 
 SCENARIO("using the memory resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_memory_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
         facts.add(make_shared<test_memory_resolver>());
         THEN("a structured fact is added") {
-            REQUIRE(facts.size() == 10);
+            REQUIRE(facts.size() == 10u);
             auto memory = facts.get<map_value>(fact::memory);
             REQUIRE(memory);
             auto info = memory->get<map_value>("swap");
             REQUIRE(info);
-            REQUIRE(info->size() == 8);
+            REQUIRE(info->size() == 8u);
             auto available = info->get<string_value>("available");
             REQUIRE(available);
             REQUIRE(available->value() == "4.00 MiB");
@@ -76,7 +78,7 @@ SCENARIO("using the memory resolver") {
             REQUIRE(used_bytes->value() == 16777216);
             info = memory->get<map_value>("system");
             REQUIRE(info);
-            REQUIRE(info->size() == 7);
+            REQUIRE(info->size() == 7u);
             available = info->get<string_value>("available");
             REQUIRE(available);
             REQUIRE(available->value() == "5.00 MiB");
@@ -100,7 +102,7 @@ SCENARIO("using the memory resolver") {
             REQUIRE(used_bytes->value() == 5242880);
         }
         THEN("flat facts are added") {
-            REQUIRE(facts.size() == 10);
+            REQUIRE(facts.size() == 10u);
             auto memoryfree = facts.get<string_value>(fact::memoryfree);
             REQUIRE(memoryfree);
             REQUIRE(memoryfree->value() == "5.00 MiB");

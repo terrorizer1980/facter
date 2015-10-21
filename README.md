@@ -7,16 +7,20 @@ An implementation of facter functionality in C++11, providing:
 * an executable for standalone command line usage
 * a ruby file to enable `require 'facter'`.
 
-Please see our [extensibility document](https://github.com/puppetlabs/facter/blob/master/Extensibility.md) to learn more
+Please see our [extensibility document](Extensibility.md) to learn more
 about extending native facter using custom and external facts.
 
 Build Requirements
 ------------------
 
 * GCC 4.8+ or Clang 5.0+ (OSX)
-* CMake >= 2.8.12
+* CMake >= 3.2.2
 * Boost C++ Libraries >= 1.54
 * yaml-cpp >= 0.5.1
+
+Currently the leatherman library is vendored as a git submodule.  To ensure submodules are initialized, please run:
+
+**`git submodule update --init`**
 
 Optional Build Libraries
 ------------------------
@@ -34,7 +38,9 @@ Note: Testing custom facts requires Ruby 1.9+ with libruby built as a dynamic li
 
 The following will install all required tools and libraries:
 
-    yum install cmake boost-devel openssl-devel yaml-cpp-devel libblkid-devel libcurl-devel gcc-c++ make
+    yum install boost-devel openssl-devel yaml-cpp-devel libblkid-devel libcurl-devel gcc-c++ make wget tar
+    wget http://www.cmake.org/files/v3.2/cmake-3.2.3-Linux-x86_64.tar.gz
+    tar xzvf cmake-3.2.3-Linux-x86_64.tar.gz --strip 1 -C /usr/local
 
 ### Setup on Mac OSX Mavericks (homebrew)
 
@@ -48,7 +54,9 @@ The following will install all required libraries:
 
 The following will install most required tools and libraries:
 
-    apt-get install build-essential cmake libboost-all-dev libssl-dev libyaml-cpp-dev libblkid-dev libcurl4-openssl-dev
+    apt-get install build-essential libboost-all-dev libssl-dev libyaml-cpp-dev libblkid-dev libcurl4-openssl-dev wget tar
+    wget http://www.cmake.org/files/v3.2/cmake-3.2.3-Linux-x86_64.tar.gz
+    tar xzvf cmake-3.2.3-Linux-x86_64.tar.gz --strip 1 -C /usr/local
 
 ### Setup on Windows
 
@@ -66,12 +74,18 @@ For the remaining tasks, build commands can be executed in the shell from Start 
 * build [Boost](http://sourceforge.net/projects/boost/files/latest/download)
 
         .\bootstrap mingw
-        .\b2 toolset=gcc --build-type=minimal install --prefix=$install --with-program_options --with-system --with-filesystem --with-date_time --with-thread --with-regex --with-log --with-locale boost.locale.iconv=off
+        .\b2 toolset=gcc --build-type=minimal install --prefix=$install --with-program_options --with-system --with-filesystem --with-date_time --with-thread --with-regex --with-log --with-locale --with-chrono boost.locale.iconv=off
 
 * build [yaml-cpp](https://code.google.com/p/yaml-cpp/downloads)
 
         cmake -G "MinGW Makefiles" -DCMAKE_PREFIX_PATH=$install -DCMAKE_INSTALL_PREFIX=$install .
         mingw32-make install
+
+* build [libcurl](http://curl.haxx.se/download)
+
+        mingw32-make mingw32
+        cp -r include\curl $install\include
+        cp -r lib\libcurl.a $install\lib
 
 In Powershell:
 
@@ -84,7 +98,7 @@ In Powershell:
     7za x boost_1_54_0.7z
     pushd boost_1_54_0
     .\bootstrap mingw
-    .\b2 toolset=gcc --build-type=minimal install --prefix=$install --with-program_options --with-system --with-filesystem --with-date_time --with-thread --with-regex --with-log --with-locale boost.locale.iconv=off
+    .\b2 toolset=gcc --build-type=minimal install --prefix=$install --with-program_options --with-system --with-filesystem --with-date_time --with-thread --with-regex --with-log --with-locale --with-chrono boost.locale.iconv=off
     popd
 
     (New-Object Net.WebClient).DownloadFile("https://yaml-cpp.googlecode.com/files/yaml-cpp-0.5.1.tar.gz", "$pwd/yaml-cpp-0.5.1.tar.gz")
@@ -95,6 +109,14 @@ In Powershell:
     mingw32-make install
     popd
 
+    (New-Object Net.WebClient).DownloadFile("http://curl.haxx.se/download/curl-7.42.1.zip", "$pwd/curl-7.42.1.zip")
+    7za x curl-7.42.1.zip
+    pushd curl-7.42.1
+    mingw32-make mingw32
+    cp -r include\curl $install\include
+    cp -r lib\libcurl.a $install\lib
+    popd
+
 Note that OpenSSL isn't needed on Windows.
 
 
@@ -102,8 +124,6 @@ Pre-Build
 ---------
 
 All of the following examples start by assuming the current directory is the root of the repo.
-
-Note the use of git submodules, so use `git submodule update --init` to ensure the submodules are populated.
 
 On Windows, add `-G "MinGW Makefiles" -DCMAKE_PREFIX_PATH=\<binary install path\> -DBOOST_STATIC=ON` to the `cmake` invocation.
 
@@ -146,6 +166,10 @@ For a debug build:
 Test
 ----
 
+If a ruby was found during configuration, execute the following command before running tests:
+
+    $ bundle install --gemfile lib/Gemfile
+
 You can run facter tests using the test target:
 
     $ cd release
@@ -160,11 +184,6 @@ For verbose test output, run `ctest` instead of using the test target:
 
     $ cd release
     $ ctest -V
-
-To run ruby tests (`make install` required):
-
-    $ cd lib
-    $ rspec
 
 Install
 -------

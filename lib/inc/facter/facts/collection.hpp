@@ -83,8 +83,9 @@ namespace facter { namespace facts {
 
         /**
          * Adds the default facts to the collection.
+         * @param include_ruby_facts Whether or not to include facts which require Ruby in the collection.
          */
-        void add_default_facts();
+        void add_default_facts(bool include_ruby_facts);
 
         /**
          * Adds a resolver to the fact collection.
@@ -157,6 +158,20 @@ namespace facter { namespace facts {
         }
 
         /**
+        * Gets a fact value by name without resolving the fact.
+        * @tparam T The expected type of the value.
+        * @param name The name of the fact to get the value of.
+        * @return Returns a pointer to the fact value or nullptr if the fact is not resolved or the value is not the expected type.
+        */
+        template <typename T = value>
+        T const* get_resolved(std::string const& name) const
+        {
+            // Lookup the fact without resolving
+            auto it = _facts.find(name);
+            return dynamic_cast<T const*>(it == _facts.end() ? nullptr : it->second.get());
+        }
+
+        /**
          * Gets a fact value by name
          * @param name The name of the fact to get the value of.
          * @return Returns a pointer to the fact value or nullptr if the fact is not in the fact collection.
@@ -183,7 +198,7 @@ namespace facter { namespace facts {
         void each(std::function<bool(std::string const&, value const*)> func);
 
         /**
-         * Writes the contents of the fact collection to the given stream.
+         * Writes the contents of the fact collection to the given stream, hiding legacy facts.
          * All facts will be resolved prior to writing.
          * @param stream The stream to write the facts to.
          * @param fmt The output format to use.
@@ -192,20 +207,42 @@ namespace facter { namespace facts {
          */
         std::ostream& write(std::ostream& stream, format fmt = format::hash, std::set<std::string> const& queries = std::set<std::string>());
 
+        /**
+         * Writes the contents of the fact collection to the given stream.
+         * All facts will be resolved prior to writing.
+         * @param stream The stream to write the facts to.
+         * @param fmt The output format to use.
+         * @param queries The set of queries to filter the output to. If empty, all facts will be output.
+         * @param show_legacy Show legacy facts when querying all facts.
+         * @return Returns the stream being written to.
+         */
+        std::ostream& write(std::ostream& stream, format fmt, std::set<std::string> const& queries, bool show_legacy);
+
+        /**
+         * Resolves all facts in the collection.
+         */
+        void resolve_facts();
+
+     protected:
+        /**
+         *  Gets external fact directories for the current platform.
+         *  @return A list of file paths that will be searched for external facts.
+         */
+        virtual std::vector<std::string> get_external_fact_directories() const;
+
      private:
-        LIBFACTER_NO_EXPORT void resolve_facts();
         LIBFACTER_NO_EXPORT void resolve_fact(std::string const& name);
         LIBFACTER_NO_EXPORT value const* get_value(std::string const& name);
         LIBFACTER_NO_EXPORT value const* query_value(std::string const& query);
         LIBFACTER_NO_EXPORT value const* lookup(value const* value, std::string const& name);
-        LIBFACTER_NO_EXPORT void write_hash(std::ostream& stream, std::set<std::string> const& queries);
-        LIBFACTER_NO_EXPORT void write_json(std::ostream& stream, std::set<std::string> const& queries);
-        LIBFACTER_NO_EXPORT void write_yaml(std::ostream& stream, std::set<std::string> const& queries);
-        LIBFACTER_NO_EXPORT void add_common_facts();
+        LIBFACTER_NO_EXPORT void write_hash(std::ostream& stream, std::set<std::string> const& queries, bool show_legacy);
+        LIBFACTER_NO_EXPORT void write_json(std::ostream& stream, std::set<std::string> const& queries, bool show_legacy);
+        LIBFACTER_NO_EXPORT void write_yaml(std::ostream& stream, std::set<std::string> const& queries, bool show_legacy);
+        LIBFACTER_NO_EXPORT void add_common_facts(bool include_ruby_facts);
+        LIBFACTER_NO_EXPORT bool add_external_facts_dir(std::vector<std::unique_ptr<external::resolver>> const& resolvers, std::string const& directory, bool warn);
 
         // Platform specific members
         LIBFACTER_NO_EXPORT void add_platform_facts();
-        LIBFACTER_NO_EXPORT std::vector<std::string> get_external_fact_directories();
         LIBFACTER_NO_EXPORT std::vector<std::unique_ptr<external::resolver>> get_external_resolvers();
 
         std::map<std::string, std::unique_ptr<value>> _facts;

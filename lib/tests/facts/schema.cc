@@ -1,16 +1,18 @@
 #include <catch.hpp>
 #include <facter/facts/collection.hpp>
 #include <facter/facts/fact.hpp>
+#include <facter/facts/vm.hpp>
 #include <facter/facts/resolver.hpp>
 #include <facter/facts/array_value.hpp>
 #include <facter/facts/map_value.hpp>
 #include <facter/facts/scalar_value.hpp>
-#include <internal/util/regex.hpp>
+#include <leatherman/util/regex.hpp>
 #include <yaml-cpp/yaml.h>
 #include <boost/nowide/fstream.hpp>
 #include "../fixtures.hpp"
 
 // Include all base resolvers here
+#include <internal/facts/resolvers/augeas_resolver.hpp>
 #include <internal/facts/resolvers/disk_resolver.hpp>
 #include <internal/facts/resolvers/dmi_resolver.hpp>
 #include <internal/facts/resolvers/ec2_resolver.hpp>
@@ -18,6 +20,7 @@
 #include <internal/facts/resolvers/gce_resolver.hpp>
 #include <internal/facts/resolvers/identity_resolver.hpp>
 #include <internal/facts/resolvers/kernel_resolver.hpp>
+#include <internal/facts/resolvers/ldom_resolver.hpp>
 #include <internal/facts/resolvers/load_average_resolver.hpp>
 #include <internal/facts/resolvers/memory_resolver.hpp>
 #include <internal/facts/resolvers/networking_resolver.hpp>
@@ -30,20 +33,32 @@
 #include <internal/facts/resolvers/timezone_resolver.hpp>
 #include <internal/facts/resolvers/uptime_resolver.hpp>
 #include <internal/facts/resolvers/virtualization_resolver.hpp>
+#include <internal/facts/resolvers/xen_resolver.hpp>
 #include <internal/facts/resolvers/zfs_resolver.hpp>
 #include <internal/facts/resolvers/zone_resolver.hpp>
 #include <internal/facts/resolvers/zpool_resolver.hpp>
 
 using namespace std;
 using namespace facter::facts;
-using namespace facter::util;
+using namespace leatherman::util;
+using namespace facter::testing;
 
 // For every base resolver, implement a resolver that outputs the minimum values to pass schema validation
 // We don't care about the actual data in the facts, only that it conforms to the schema
 
+struct augeas_resolver : resolvers::augeas_resolver
+{
+ protected:
+    virtual string get_version() override
+    {
+        return "1.1.0";
+    }
+};
+
 struct disk_resolver : resolvers::disk_resolver
 {
-    data collect_data(collection& facts) override
+ protected:
+    virtual data collect_data(collection& facts) override
     {
         data result;
         result.disks.push_back({
@@ -107,6 +122,7 @@ struct filesystem_resolver : resolvers::filesystem_resolver
         p.label = "label";
         p.partition_label = "partlabel";
         p.mount = "mount";
+        p.backing_file = "/foo/bar";
         result.partitions.emplace_back(move(p));
         return result;
     }
@@ -178,12 +194,10 @@ struct networking_resolver : resolvers::networking_resolver
         interface iface;
         iface.name = "interface1";
         iface.dhcp_server = "192.168.1.1";
-        iface.address.v4 = "127.0.0.1";
-        iface.address.v6 = "fe80::1";
-        iface.netmask.v4 = "255.0.0.0";
-        iface.netmask.v6 = "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
-        iface.network.v4 = "127.0.0.0";
-        iface.network.v6 = "::1";
+        iface.ipv4_bindings.emplace_back(binding { "127.0.0.1", "255.0.0.0", "127.0.0.0"});
+        iface.ipv4_bindings.emplace_back(binding { "123.123.123.123", "255.255.255.0", "123.123.123.0"});
+        iface.ipv6_bindings.emplace_back(binding { "fe80::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "::1"});
+        iface.ipv6_bindings.emplace_back(binding { "fe80::2", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "::2"});
         iface.macaddress = "00:00:00:00:00:00";
         iface.mtu = 12345;
         result.interfaces.emplace_back(move(iface));
@@ -198,7 +212,10 @@ struct operating_system_resolver : resolvers::operating_system_resolver
     {
         data result;
         result.name = "name";
+        result.family = "family";
         result.release = "1.2.3";
+        result.major = "1.2";
+        result.minor = "3";
         result.specification_version = "1.4";
         result.distro.id = "id";
         result.distro.release = "1.2.3";
@@ -218,11 +235,6 @@ struct operating_system_resolver : resolvers::operating_system_resolver
         result.selinux.config_policy = "config policy";
         result.selinux.policy_version = "policy version";
         return result;
-    }
-
-    virtual tuple<string, string> parse_release(string const& name, string const& release) const override
-    {
-        return make_tuple("1.2", "3");
     }
 };
 
@@ -335,14 +347,31 @@ struct virtualization_resolver : resolvers::virtualization_resolver
 protected:
     virtual string get_hypervisor(collection& facts) override
     {
-        return "hypervisor";
+        // The xen fact only resolves if virtualization is xen_privileged.
+        return vm::xen_privileged;
+    }
+};
+
+struct xen_resolver : resolvers::xen_resolver
+{
+protected:
+    virtual string xen_command() override
+    {
+        return "";
+    }
+
+    virtual data collect_data(collection& facts) override
+    {
+        data result;
+        result.domains = { "domain1", "domain2" };
+        return result;
     }
 };
 
 struct zfs_resolver : resolvers::zfs_resolver
 {
 protected:
-    virtual string zfs_command()
+    virtual string zfs_command() override
     {
         return "";
     }
@@ -379,7 +408,7 @@ protected:
 struct zpool_resolver : resolvers::zpool_resolver
 {
 protected:
-    virtual string zpool_command()
+    virtual string zpool_command() override
     {
         return "";
     }
@@ -395,7 +424,9 @@ protected:
 
 void add_all_facts(collection& facts)
 {
+    facts.add("env_windows_installdir", make_value<string_value>("C:\\Program Files\\Some\\Path"));
     facts.add("facterversion", make_value<string_value>("version"));
+    facts.add(make_shared<augeas_resolver>());
     facts.add(make_shared<disk_resolver>());
     facts.add(make_shared<dmi_resolver>());
     facts.add(make_shared<filesystem_resolver>());
@@ -406,6 +437,8 @@ void add_all_facts(collection& facts)
     facts.add(fact::gce, make_value<map_value>());
     facts.add(make_shared<identity_resolver>());
     facts.add(make_shared<kernel_resolver>());
+    facts.add(fact::ldom, make_value<map_value>());
+    facts.add("ldom_domainname", make_value<string_value>("somedomain", true));
     facts.add(make_shared<load_average_resolver>());
     facts.add(make_shared<memory_resolver>());
     facts.add(make_shared<networking_resolver>());
@@ -418,6 +451,7 @@ void add_all_facts(collection& facts)
     facts.add(make_shared<timezone_resolver>());
     facts.add(make_shared<uptime_resolver>());
     facts.add(make_shared<virtualization_resolver>());
+    facts.add(make_shared<xen_resolver>());
     facts.add(make_shared<zfs_resolver>());
     facts.add(make_shared<zone_resolver>());
     facts.add(make_shared<zpool_resolver>());
@@ -627,7 +661,7 @@ SCENARIO("validating schema") {
     boost::nowide::ifstream stream(LIBFACTER_TESTS_DIRECTORY "/../schema/facter.yaml");
 
     YAML::Node schema = YAML::Load(stream);
-    collection facts;
+    collection_fixture facts;
 
     WHEN("validating the schema itself") {
         THEN("all attributes must be valid") {
@@ -659,7 +693,7 @@ SCENARIO("validating schema") {
             REQUIRE(found.size() == schema.size());
         }
         THEN("the current platform's facts must conform to the schema") {
-            facts.add_default_facts();
+            facts.add_default_facts(true);
 
             set<string> found;
 

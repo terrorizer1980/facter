@@ -4,6 +4,7 @@
 */
 #pragma once
 
+#include <stdexcept>
 #include <ostream>
 #include <string>
 #include <boost/format.hpp>
@@ -159,16 +160,21 @@ namespace facter { namespace logging {
     /**
      * Starts colorizing for the given logging level.
      * This is a no-op on platforms that don't natively support terminal colors.
-     * @param lvl The logging level to colorize for.
-     * @return Returns the start code for colorization or an empty string if not supported.
+     * @param os The stream to colorize.
+     * @param lvl The logging level to colorize for. Defaults to none, which resets colorization.
      */
-    LIBFACTER_EXPORT std::string const& colorize(level lvl);
+    LIBFACTER_EXPORT void colorize(std::ostream &os, level lvl = level::none);
 
     /**
-     * Resets the colorization.
-     * This is a no-op on platforms that don't natively support terminal colors.
-     * @return Returns the reset code for colorization or an empty string if not supported.
+     * Exception to indicate that locale setup was not possible.
      */
-    LIBFACTER_EXPORT std::string const& colorize();
+    class locale_error : public std::runtime_error {
+    public:
+         /**
+          * Constructs a locale_error exception.
+          * @param msg The exception message.
+          */
+         explicit locale_error(const std::string& msg) : std::runtime_error(msg) {}
+    };
 
 }}  // namespace facter::logging

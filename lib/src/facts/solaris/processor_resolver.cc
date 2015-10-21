@@ -1,11 +1,15 @@
 #include <internal/facts/solaris/processor_resolver.hpp>
 #include <internal/util/solaris/k_stat.hpp>
 #include <leatherman/logging/logging.hpp>
+#include <leatherman/execution/execution.hpp>
+#include <leatherman/util/regex.hpp>
 #include <unordered_set>
 #include <sys/processor.h>
 
 using namespace std;
 using namespace facter::util::solaris;
+using namespace leatherman::util;
+using namespace leatherman::execution;
 
 /*
  * https://blogs.oracle.com/mandalika/entry/solaris_show_me_the_cpu
@@ -53,7 +57,6 @@ namespace facter { namespace facts { namespace solaris {
 
         try {
             unordered_set<int> chips;
-
             k_stat kc;
             auto kv = kc["cpu_info"];
             for (auto const& ke : kv) {
@@ -67,13 +70,36 @@ namespace facter { namespace facts { namespace solaris {
                         result.speed = static_cast<int64_t>(ke.value<uint64_t>("current_clock_Hz"));
                     }
                 } catch (kstat_exception& ex) {
-                    LOG_DEBUG("failed to read processor data: %1%.", ex.what());
+                    LOG_DEBUG("failed to read processor data entry: %1%.", ex.what());
                 }
             }
             result.physical_count = chips.size();
         } catch (kstat_exception& ex) {
-            LOG_DEBUG("failed to read processor data: %1%.", ex.what());
+            LOG_DEBUG("failed to read processor data from kstat api: %1%.", ex.what());
+
+            unordered_set<int> chips;
+            string brand;
+            int32_t chip_id;
+            int64_t current_clock_hz;
+
+            static boost::regex brand_rx("^\\s*brand\\s+(.+)$");
+            static boost::regex chip_id_rx("^\\s*chip_id\\s+(\\d+)$");
+            static boost::regex current_clock_hz_rx("^\\s*current_clock_Hz\\s+(\\d+)$");
+
+            each_line("/usr/bin/kstat", {"cpu_info"}, [&] (string& line) {
+                if (re_search(line, brand_rx, &brand)) {
+                    result.models.emplace_back(move(brand));
+                } else if (re_search(line, chip_id_rx, &chip_id)) {
+                    ++result.logical_count;
+                    chips.insert(chip_id);
+                } else if (result.speed == 0 && re_search(line, current_clock_hz_rx, &current_clock_hz)) {
+                    result.speed = current_clock_hz;
+                }
+                return true;
+            });
+            result.physical_count = chips.size();
         }
+
         return result;
     }
 }}}  // namespace facter::facts::solaris

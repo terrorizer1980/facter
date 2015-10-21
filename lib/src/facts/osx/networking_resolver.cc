@@ -2,13 +2,13 @@
 #include <facter/facts/collection.hpp>
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
-#include <facter/execution/execution.hpp>
+#include <leatherman/execution/execution.hpp>
 #include <boost/algorithm/string.hpp>
 #include <net/if_dl.h>
 #include <net/if.h>
 
 using namespace std;
-using namespace facter::execution;
+using namespace leatherman::execution;
 
 namespace facter { namespace facts { namespace osx {
 
@@ -32,7 +32,7 @@ namespace facter { namespace facts { namespace osx {
     boost::optional<uint64_t> networking_resolver::get_link_mtu(string const& interface, void* data) const
     {
         if (!data) {
-            return {};
+            return boost::none;
         }
         return reinterpret_cast<if_data const*>(data)->ifi_mtu;
     }
@@ -40,7 +40,7 @@ namespace facter { namespace facts { namespace osx {
     string networking_resolver::get_primary_interface() const
     {
         string interface;
-        execution::each_line("route", { "-n", "get",  "default" }, [&interface](string& line){
+        each_line("route", { "-n", "get",  "default" }, [&interface](string& line){
             boost::trim(line);
             if (boost::starts_with(line, "interface: ")) {
                 interface = line.substr(11);
@@ -61,11 +61,11 @@ namespace facter { namespace facts { namespace osx {
     string networking_resolver::find_dhcp_server(string const& interface) const
     {
         // Use ipconfig to get the server identifier
-        auto result = execute("ipconfig", { "getoption", interface, "server_identifier" });
-        if (!result.first) {
+        auto exec = execute("ipconfig", { "getoption", interface, "server_identifier" });
+        if (!exec.success) {
             return {};
         }
-        return result.second;
+        return exec.output;
     }
 
 }}}  // namespace facter::facts::osx

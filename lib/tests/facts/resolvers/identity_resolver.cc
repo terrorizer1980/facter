@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_identity_resolver : identity_resolver
 {
@@ -33,11 +35,11 @@ struct test_identity_resolver : identity_resolver
 };
 
 SCENARIO("using the identity resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_identity_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
@@ -45,7 +47,7 @@ SCENARIO("using the identity resolver") {
         THEN("a structured fact is added") {
             auto identity = facts.get<map_value>(fact::identity);
             REQUIRE(identity);
-            REQUIRE(identity->size() == 4);
+            REQUIRE(identity->size() == 4u);
 
             auto name = identity->get<string_value>("group");
             REQUIRE(name);

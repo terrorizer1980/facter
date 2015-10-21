@@ -1,16 +1,17 @@
 #include <internal/facts/bsd/networking_resolver.hpp>
 #include <internal/util/bsd/scoped_ifaddrs.hpp>
-#include <facter/execution/execution.hpp>
-#include <facter/util/file.hpp>
-#include <facter/util/directory.hpp>
+#include <leatherman/execution/execution.hpp>
+#include <leatherman/file_util/file.hpp>
+#include <leatherman/file_util/directory.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/algorithm/string.hpp>
 #include <netinet/in.h>
 
 using namespace std;
-using namespace facter::util;
 using namespace facter::util::bsd;
-using namespace facter::execution;
+using namespace leatherman::execution;
+
+namespace lth_file = leatherman::file_util;
 
 namespace facter { namespace facts { namespace bsd {
 
@@ -40,9 +41,6 @@ namespace facter { namespace facts { namespace bsd {
         }
 
         data.primary_interface = get_primary_interface();
-        if (data.primary_interface.empty()) {
-            LOG_DEBUG("no primary interface found: using first interface with an assigned address.");
-        }
 
         // Start by getting the DHCP servers
         auto dhcp_servers = find_dhcp_servers();
@@ -52,30 +50,12 @@ namespace facter { namespace facts { namespace bsd {
         while (it != interface_map.end()) {
             string const& name = it->first;
 
-            // If we don't have a primary interface yet, walk the addresses
-            // If there's a non-loopback address assigned, treat it as primary
-            if (data.primary_interface.empty()) {
-                for (auto addr_it = it; addr_it != interface_map.end() && addr_it->first == name; ++addr_it) {
-                    ifaddrs const *addr = addr_it->second;
-                    if (addr->ifa_addr->sa_family != AF_INET && addr->ifa_addr->sa_family != AF_INET6) {
-                        continue;
-                    }
-
-                    string ip = address_to_string(addr->ifa_addr, addr->ifa_netmask);
-                    if (!boost::starts_with(ip, "127.") && ip != "::1" && !boost::starts_with(ip, "fe80")) {
-                        data.primary_interface = name;
-                        break;
-                    }
-                }
-            }
-
             interface iface;
             iface.name = name;
 
             // Walk the addresses of this interface and populate the data
             for (; it != interface_map.end() && it->first == name; ++it) {
-                populate_address(iface, it->second);
-                populate_network(iface, it->second);
+                populate_binding(iface, it->second);
                 populate_mtu(iface, it->second);
             }
 
@@ -92,48 +72,33 @@ namespace facter { namespace facts { namespace bsd {
         return data;
     }
 
-    void networking_resolver::populate_address(interface& iface, ifaddrs const* addr) const
+    void networking_resolver::populate_binding(interface& iface, ifaddrs const* addr) const
     {
-        string* address = nullptr;
+        // If the address is a link address, populate the MAC
+        if (is_link_address(addr->ifa_addr)) {
+            iface.macaddress = address_to_string(addr->ifa_addr);
+            return;
+        }
+
+        // Populate the correct bindings list
+        vector<binding>* bindings = nullptr;
         if (addr->ifa_addr->sa_family == AF_INET) {
-            address = &iface.address.v4;
+            bindings = &iface.ipv4_bindings;
         } else if (addr->ifa_addr->sa_family == AF_INET6) {
-            address = &iface.address.v6;
-        } else if (is_link_address(addr->ifa_addr)) {
-            address = &iface.macaddress;
+            bindings = &iface.ipv6_bindings;
         }
 
-        if (!address) {
-            // Unsupported address
+        if (!bindings) {
             return;
         }
 
-        *address = address_to_string(addr->ifa_addr);
-    }
-
-    void networking_resolver::populate_network(interface& iface, ifaddrs const* addr) const
-    {
-        // Limit these facts to IPv4 and IPv6 with a netmask address
-        if ((addr->ifa_addr->sa_family != AF_INET &&
-             addr->ifa_addr->sa_family != AF_INET6) || !addr->ifa_netmask) {
-            return;
+        binding b;
+        b.address = address_to_string(addr->ifa_addr);
+        if (addr->ifa_netmask) {
+            b.netmask = address_to_string(addr->ifa_netmask);
+            b.network = address_to_string(addr->ifa_addr, addr->ifa_netmask);
         }
-
-        if (addr->ifa_addr->sa_family == AF_INET) {
-            // Check to see if the data already exists; interfaces can have multiple addresses of the same type
-            if (!iface.netmask.v4.empty()) {
-                return;
-            }
-            iface.netmask.v4 = address_to_string(addr->ifa_netmask);
-            iface.network.v4 = address_to_string(addr->ifa_addr, addr->ifa_netmask);
-        } else {
-            // Check to see if the data already exists; interfaces can have multiple addresses of the same type
-            if (!iface.netmask.v6.empty()) {
-                return;
-            }
-            iface.netmask.v6 = address_to_string(addr->ifa_netmask);
-            iface.network.v6 = address_to_string(addr->ifa_addr, addr->ifa_netmask);
-        }
+        bindings->emplace_back(std::move(b));
     }
 
     void networking_resolver::populate_mtu(interface& iface, ifaddrs const* addr) const
@@ -167,13 +132,13 @@ namespace facter { namespace facts { namespace bsd {
 
         for (auto const& dir : dhclient_search_directories) {
             LOG_DEBUG("searching \"%1%\" for dhclient lease files.", dir);
-            directory::each_file(dir, [&](string const& path) {
+            lth_file::each_file(dir, [&](string const& path) {
                 LOG_DEBUG("reading \"%1%\" for dhclient lease information.", path);
 
                 // Each lease entry should have the interface declaration before the options
                 // We respect the last lease for an interface in the file
                 string interface;
-                file::each_line(path, [&](string& line) {
+                lth_file::each_line(path, [&](string& line) {
                     boost::trim(line);
                     if (boost::starts_with(line, "interface ")) {
                         interface = line.substr(10);
@@ -196,7 +161,7 @@ namespace facter { namespace facts { namespace bsd {
         // Use dhcpcd if it's present to get the interface's DHCP lease information
         // This assumes we've already searched for the interface with dhclient
         string value;
-        execution::each_line("dhcpcd", { "-U", interface }, [&value](string& line) {
+        each_line("dhcpcd", { "-U", interface }, [&value](string& line) {
             if (boost::starts_with(line, "dhcp_server_identifier=")) {
                 value = line.substr(23);
                 boost::trim(value);

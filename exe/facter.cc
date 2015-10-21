@@ -2,6 +2,7 @@
 #include <facter/logging/logging.hpp>
 #include <facter/facts/collection.hpp>
 #include <facter/ruby/ruby.hpp>
+#include <leatherman/util/scope_exit.hpp>
 #include <boost/algorithm/string.hpp>
 // Note the caveats in nowide::cout/cerr; they're not synchronized with stdio.
 // Thus they can't be relied on to flush before program exit.
@@ -119,10 +120,13 @@ int main(int argc, char **argv)
             ("external-dir", po::value<vector<string>>(&external_directories), "A directory to use for external facts.")
             ("help", "Print this help message.")
             ("json,j", "Output in JSON format.")
+            ("show-legacy", "Show legacy facts when querying all facts.")
             ("log-level,l", po::value<level>()->default_value(level::warning, "warn"), "Set logging level.\nSupported levels are: none, trace, debug, info, warn, error, and fatal.")
             ("no-color", "Disables color output.")
             ("no-custom-facts", "Disables custom facts.")
             ("no-external-facts", "Disables external facts.")
+            ("no-ruby", "Disables loading Ruby, facts requiring Ruby, and custom facts.")
+            ("puppet,p", "(Deprecated: use `puppet facts` instead) Load the Puppet libraries, thus allowing Facter to load Puppet-specific facts.")
             ("trace", "Enable backtraces for custom facts.")
             ("verbose", "Enable verbose (info) output.")
             ("version,v", "Print the version and exit.")
@@ -170,9 +174,20 @@ int main(int argc, char **argv)
             if ((vm.count("debug") + vm.count("verbose") + (vm["log-level"].defaulted() ? 0 : 1)) > 1) {
                 throw po::error("debug, verbose, and log-level options conflict: please specify only one.");
             }
+            if (vm.count("no-ruby") && vm.count("custom-dir")) {
+                throw po::error("no-ruby and custom-dir options conflict: please specify only one.");
+            }
+            if (vm.count("puppet") && vm.count("no-custom-facts")) {
+                throw po::error("puppet and no-custom-facts options conflict: please specify only one.");
+            }
+            if (vm.count("puppet") && vm.count("no-ruby")) {
+                throw po::error("puppet and no-ruby options conflict: please specify only one.");
+            }
         }
         catch (exception& ex) {
-            boost::nowide::cerr << colorize(level::error) << "error: " << ex.what() << colorize() << "\n" << endl;
+            colorize(boost::nowide::cerr, level::error);
+            boost::nowide::cerr << "error: " << ex.what() << "\n" << endl;
+            colorize(boost::nowide::cerr);
             help(visible_options);
             return EXIT_FAILURE;
         }
@@ -202,7 +217,12 @@ int main(int argc, char **argv)
         log_command_line(argc, argv);
 
         // Initialize Ruby in main
-        bool ruby = facter::ruby::initialize(vm.count("trace") == 1);
+        bool ruby = (vm.count("no-ruby") == 0) && facter::ruby::initialize(vm.count("trace") == 1);
+        leatherman::util::scope_exit ruby_cleanup{[ruby]() {
+            if (ruby) {
+                facter::ruby::uninitialize();
+            }
+        }};
 
         // Build a set of queries from the command line
         set<string> queries;
@@ -228,7 +248,7 @@ int main(int argc, char **argv)
         log_queries(queries);
 
         collection facts;
-        facts.add_default_facts();
+        facts.add_default_facts(ruby);
 
         if (!vm.count("no-external-facts")) {
             facts.add_external_facts(external_directories);
@@ -238,7 +258,7 @@ int main(int argc, char **argv)
         facts.add_environment_facts();
 
         if (ruby && !vm.count("no-custom-facts")) {
-            facter::ruby::load_custom_facts(facts, custom_directories);
+            facter::ruby::load_custom_facts(facts, vm.count("puppet"), custom_directories);
         }
 
         // Output the facts
@@ -248,8 +268,13 @@ int main(int argc, char **argv)
         } else if (vm.count("yaml")) {
             fmt = format::yaml;
         }
-        facts.write(boost::nowide::cout, fmt, queries);
+
+        bool show_legacy = vm.count("show-legacy");
+        facts.write(boost::nowide::cout, fmt, queries, show_legacy);
         boost::nowide::cout << endl;
+    } catch (locale_error const& e) {
+        boost::nowide::cerr << "failed to initialize logging system due to a locale error: " << e.what() << "\n" << endl;
+        return 2;  // special error code to indicate we failed harder than normal
     } catch (exception& ex) {
         log(level::fatal, "unhandled exception: %1%", ex.what());
     }

@@ -50,6 +50,7 @@ namespace facter { namespace facts { namespace linux {
         /**
          * Release file for generic Linux distros.
          * Also used for:
+         * - Cisco
          * - CoreOS
          * - Cumulus
          */
@@ -83,6 +84,10 @@ namespace facter { namespace facts { namespace linux {
          */
         constexpr static char const* archlinux = "/etc/arch-release";
         /**
+         * Release file for Manjaro Linux.
+         */
+        constexpr static char const* manjarolinux = "/etc/manjaro-release";
+        /**
          * Release file for VMWare ESX Linux.
          */
         constexpr static char const* vmware_esx = "/etc/vmware-release";
@@ -102,6 +107,10 @@ namespace facter { namespace facts { namespace linux {
          * Release file for Mint Linux.
          */
         constexpr static char const* linux_mint_info = "/etc/linuxmint/info";
+        /**
+         * Release file for AristaEOS.
+         */
+        constexpr static char const* arista_eos = "/etc/Eos-release";
     };
 
 }}}  // namespace facter::facts::linux

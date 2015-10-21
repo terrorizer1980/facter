@@ -4,15 +4,16 @@
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/array_value.hpp>
 #include <facter/facts/map_value.hpp>
-#include <facter/util/directory.hpp>
-#include <facter/util/environment.hpp>
+#include <leatherman/file_util/directory.hpp>
+#include <leatherman/util/environment.hpp>
 #include <facter/util/string.hpp>
 #include <facter/version.h>
-#include <internal/util/dynamic_library.hpp>
+#include <leatherman/dynamic_library/dynamic_library.hpp>
 #include <internal/facts/resolvers/ruby_resolver.hpp>
 #include <internal/facts/resolvers/path_resolver.hpp>
 #include <internal/facts/resolvers/ec2_resolver.hpp>
 #include <internal/facts/resolvers/gce_resolver.hpp>
+#include <internal/facts/resolvers/augeas_resolver.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
@@ -26,6 +27,8 @@ using namespace facter::util;
 using namespace rapidjson;
 using namespace YAML;
 using namespace boost::filesystem;
+using namespace leatherman::util;
+using namespace leatherman::file_util;
 
 namespace facter { namespace facts {
 
@@ -55,9 +58,9 @@ namespace facter { namespace facts {
         return *this;
     }
 
-    void collection::add_default_facts()
+    void collection::add_default_facts(bool include_ruby_facts)
     {
-        add_common_facts();
+        add_common_facts(include_ruby_facts);
         add_platform_facts();
     }
 
@@ -115,59 +118,61 @@ namespace facter { namespace facts {
         _facts[move(name)] = move(value);
     }
 
+    bool collection::add_external_facts_dir(vector<unique_ptr<external::resolver>> const& resolvers, string const& dir, bool warn)
+    {
+        // If dir is relative, make it an absolute path before passing to can_resolve.
+        bool found = false;
+        boost::system::error_code ec;
+        path search_dir = canonical(dir, ec);
+
+        if (ec || !is_directory(search_dir, ec)) {
+            // Warn the user if not using the default search directories
+            string msg = ec ? ec.message() : "not a directory";
+            if (warn) {
+                LOG_WARNING("skipping external facts for \"%1%\": %2%", dir, msg);
+            } else {
+                LOG_DEBUG("skipping external facts for \"%1%\": %2%", dir, msg);
+            }
+            return found;
+        }
+
+        LOG_DEBUG("searching %1% for external facts.", search_dir);
+
+        each_file(search_dir.string(), [&](string const& path) {
+            for (auto const& res : resolvers) {
+                if (res->can_resolve(path)) {
+                    try {
+                        found = true;
+                        res->resolve(path, *this);
+                    }
+                    catch (external::external_fact_exception& ex) {
+                        LOG_ERROR("error while processing \"%1%\" for external facts: %2%", path, ex.what());
+                    }
+                    break;
+                }
+            }
+            return true;
+        });
+        return found;
+    }
+
     void collection::add_external_facts(vector<string> const& directories)
     {
         auto resolvers = get_external_resolvers();
 
-        auto search_directories = directories;
-        if (search_directories.empty()) {
-            search_directories = get_external_fact_directories();
-        }
-
         // Build a map between a file and the resolver that can resolve it
-        map<string, external::resolver const*> files;
-        for (auto const& dir : search_directories) {
-            // If dir is relative, make it an absolute path before passing to can_resolve.
-            boost::system::error_code ec;
-            path search_dir = canonical(dir, ec);
-
-            if (ec || !is_directory(search_dir, ec)) {
-                // Warn the user if not using the default search directories
-                string msg = ec ? ec.message() : "not a directory";
-                if (!directories.empty()) {
-                    LOG_WARNING("skipping external facts for \"%1%\": %2%", dir, msg);
-                } else {
-                    LOG_DEBUG("skipping external facts for \"%1%\": %2%", dir, msg);
-                }
-                continue;
-            }
-
-            LOG_DEBUG("searching %1% for external facts.", search_dir);
-
-            directory::each_file(search_dir.string(), [&](string const& path) {
-                for (auto const& res : resolvers) {
-                    if (res->can_resolve(path)) {
-                        files.emplace(path, res.get());
-                        break;
-                    }
-                }
-                return true;
-            });
+        // Start with default Facter search directories, then user-specified directories.
+        bool found = false;
+        for (auto const& dir : get_external_fact_directories()) {
+            found |= add_external_facts_dir(resolvers, dir, false);
         }
 
-        if (files.empty()) {
+        for (auto const& dir : directories) {
+            found |= add_external_facts_dir(resolvers, dir, true);
+        }
+
+        if (!found) {
             LOG_DEBUG("no external facts were found.");
-            return;
-        }
-
-        // Resolve the files
-        for (auto const& kvp : files) {
-            try {
-                kvp.second->resolve(kvp.first, *this);
-            }
-            catch (external::external_fact_exception& ex) {
-                LOG_ERROR("error while processing \"%1%\" for external facts: %2%", kvp.first, ex.what());
-            }
         }
     }
 
@@ -261,17 +266,22 @@ namespace facter { namespace facts {
 
     ostream& collection::write(ostream& stream, format fmt, set<string> const& queries)
     {
+        return write(stream, fmt, queries, false);
+    }
+
+    ostream& collection::write(ostream& stream, format fmt, set<string> const& queries, bool show_legacy)
+    {
         if (queries.empty()) {
             // Resolve all facts
             resolve_facts();
         }
 
         if (fmt == format::hash) {
-            write_hash(stream, queries);
+            write_hash(stream, queries, show_legacy);
         } else if (fmt == format::json) {
-            write_json(stream, queries);
+            write_json(stream, queries, show_legacy);
         } else if (fmt == format::yaml) {
-            write_yaml(stream, queries);
+            write_yaml(stream, queries, show_legacy);
         }
         return stream;
     }
@@ -399,10 +409,10 @@ namespace facter { namespace facts {
         return nullptr;
     }
 
-    void collection::write_hash(ostream& stream, set<string> const& queries)
+    void collection::write_hash(ostream& stream, set<string> const& queries, bool show_legacy)
     {
         // If there's only one query, print the result without the name
-        if (queries.size() == 1) {
+        if (queries.size() == 1u) {
             auto value = query_value(*queries.begin());
             if (value) {
                 value->write(stream, false);
@@ -413,7 +423,7 @@ namespace facter { namespace facts {
         bool first = true;
         auto writer = ([&](string const& key, value const* val) {
             // Ignore facts with hidden values
-            if (queries.empty() && val && val->hidden()) {
+            if (!show_legacy && queries.empty() && val && val->hidden()) {
                 return;
             }
             if (first) {
@@ -456,27 +466,32 @@ namespace facter { namespace facts {
             _stream << c;
         }
 
+        void Flush()
+        {
+            _stream.flush();
+        }
+
      private:
          ostream& _stream;
     };
 
-    void collection::write_json(ostream& stream, set<string> const& queries)
+    void collection::write_json(ostream& stream, set<string> const& queries, bool show_legacy)
     {
-        Document document;
+        json_document document;
         document.SetObject();
 
         auto builder = ([&](string const& key, value const* val) {
             // Ignore facts with hidden values
-            if (queries.empty() && val && val->hidden()) {
+            if (!show_legacy && queries.empty() && val && val->hidden()) {
                 return;
             }
-            rapidjson::Value value;
+            json_value value;
             if (val) {
                 val->to_json(document.GetAllocator(), value);
             } else {
                 value.SetString("", 0);
             }
-            document.AddMember(key.c_str(), value, document.GetAllocator());
+            document.AddMember(StringRef(key.c_str(), key.size()), value, document.GetAllocator());
         });
 
         if (!queries.empty()) {
@@ -495,14 +510,14 @@ namespace facter { namespace facts {
         document.Accept(writer);
     }
 
-    void collection::write_yaml(ostream& stream, set<string> const& queries)
+    void collection::write_yaml(ostream& stream, set<string> const& queries, bool show_legacy)
     {
         Emitter emitter(stream);
         emitter << BeginMap;
 
         auto writer = ([&](string const& key, value const* val) {
             // Ignore facts with hidden values
-            if (queries.empty() && val && val->hidden()) {
+            if (!show_legacy && queries.empty() && val && val->hidden()) {
                 return;
             }
             emitter << Key;
@@ -534,13 +549,17 @@ namespace facter { namespace facts {
         emitter << EndMap;
     }
 
-    void collection::add_common_facts()
+    void collection::add_common_facts(bool include_ruby_facts)
     {
         add("facterversion", make_value<string_value>(LIBFACTER_VERSION));
-        add(make_shared<resolvers::ruby_resolver>());
+
+        if (include_ruby_facts) {
+            add(make_shared<resolvers::ruby_resolver>());
+        }
         add(make_shared<resolvers::path_resolver>());
         add(make_shared<resolvers::ec2_resolver>());
         add(make_shared<resolvers::gce_resolver>());
+        add(make_shared<resolvers::augeas_resolver>());
     }
 
 }}  // namespace facter::facts

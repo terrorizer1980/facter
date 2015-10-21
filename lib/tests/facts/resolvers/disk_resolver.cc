@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct test_disk_resolver : disk_resolver
 {
@@ -35,12 +37,12 @@ struct test_disk_resolver : disk_resolver
 };
 
 SCENARIO("using the disk resolver") {
-    collection facts;
+    collection_fixture facts;
     auto resolver = make_shared<test_disk_resolver>();
     facts.add(resolver);
     GIVEN("no disks present") {
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     GIVEN("five present disks") {
@@ -59,7 +61,7 @@ SCENARIO("using the disk resolver") {
 
                 auto disk = disks->get<map_value>("disk" + num);
                 REQUIRE(disk);
-                REQUIRE(disk->size() == 5);
+                REQUIRE(disk->size() == 5u);
 
                 auto model = disk->get<string_value>("model");
                 REQUIRE(model);
@@ -99,7 +101,7 @@ SCENARIO("using the disk resolver") {
                 REQUIRE(vendor);
                 REQUIRE(vendor->value() == "vendor" + num);
 
-                if (names.size() > 0) {
+                if (names.size() > 0u) {
                     names += ",";
                 }
                 names += "disk" + num;

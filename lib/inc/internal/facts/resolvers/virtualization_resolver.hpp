@@ -39,6 +39,14 @@ namespace facter { namespace facts { namespace resolvers {
          * @return Returns true if the hypervisor is virtual or false if it is physical.
          */
         virtual bool is_virtual(std::string const& hypervisor);
+
+        /**
+         * Gets the product name which is matched against a list of known
+         * hypervisors.
+         * @param product_name The product_name fact to match against.
+         * @return Returns the hypervisor product name if matched.
+         */
+        static std::string get_product_name_vm(std::string const& product_name);
     };
 
 }}}  // namespace facter::facts::resolvers

@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_ruby_resolver : ruby_resolver
 {
@@ -32,20 +34,20 @@ struct test_ruby_resolver : ruby_resolver
 };
 
 SCENARIO("using the ruby resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_ruby_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
         facts.add(make_shared<test_ruby_resolver>());
         THEN("a structured fact is added") {
-            REQUIRE(facts.size() == 4);
+            REQUIRE(facts.size() == 4u);
             auto ruby = facts.get<map_value>(fact::ruby);
             REQUIRE(ruby);
-            REQUIRE(ruby->size() == 3);
+            REQUIRE(ruby->size() == 3u);
             auto platform = ruby->get<string_value>("platform");
             REQUIRE(platform);
             REQUIRE(platform->value() == "i386-mingw32");
@@ -57,7 +59,7 @@ SCENARIO("using the ruby resolver") {
             REQUIRE(version->value() == "2.1.4");
         }
         THEN("flat facts are added") {
-            REQUIRE(facts.size() == 4);
+            REQUIRE(facts.size() == 4u);
             auto platform = facts.get<string_value>(fact::rubyplatform);
             REQUIRE(platform);
             REQUIRE(platform->value() == "i386-mingw32");

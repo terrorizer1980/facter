@@ -4,10 +4,12 @@
 #include <facter/facts/fact.hpp>
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include "../../collection_fixture.hpp"
 
 using namespace std;
 using namespace facter::facts;
 using namespace facter::facts::resolvers;
+using namespace facter::testing;
 
 struct empty_dmi_resolver : dmi_resolver
 {
@@ -42,11 +44,11 @@ struct test_dmi_resolver : dmi_resolver
 };
 
 SCENARIO("using the DMI resolver") {
-    collection facts;
+    collection_fixture facts;
     WHEN("data is not present") {
         facts.add(make_shared<empty_dmi_resolver>());
         THEN("facts should not be added") {
-            REQUIRE(facts.size() == 0);
+            REQUIRE(facts.size() == 0u);
         }
     }
     WHEN("data is present") {
@@ -54,11 +56,11 @@ SCENARIO("using the DMI resolver") {
         THEN("a structured fact is added") {
             auto dmi = facts.get<map_value>(fact::dmi);
             REQUIRE(dmi);
-            REQUIRE(dmi->size() == 5);
+            REQUIRE(dmi->size() == 5u);
 
             auto bios = dmi->get<map_value>("bios");
             REQUIRE(bios);
-            REQUIRE(bios->size() == 3);
+            REQUIRE(bios->size() == 3u);
 
             auto value = bios->get<string_value>("release_date");
             REQUIRE(value);
@@ -74,7 +76,7 @@ SCENARIO("using the DMI resolver") {
 
             auto board = dmi->get<map_value>("board");
             REQUIRE(board);
-            REQUIRE(board->size() == 4);
+            REQUIRE(board->size() == 4u);
 
             value = board->get<string_value>("asset_tag");
             REQUIRE(value);
@@ -94,7 +96,7 @@ SCENARIO("using the DMI resolver") {
 
             auto chassis = dmi->get<map_value>("chassis");
             REQUIRE(chassis);
-            REQUIRE(chassis->size() == 2);
+            REQUIRE(chassis->size() == 2u);
 
             value = chassis->get<string_value>("asset_tag");
             REQUIRE(value);
@@ -110,7 +112,7 @@ SCENARIO("using the DMI resolver") {
 
             auto product = dmi->get<map_value>("product");
             REQUIRE(product);
-            REQUIRE(product->size() == 3);
+            REQUIRE(product->size() == 3u);
 
             value = product->get<string_value>("name");
             REQUIRE(value);
