@@ -1,3 +1,4 @@
+# encoding: UTF-8
 require 'spec_helper'
 
 Facter.on_message do |level, message|
@@ -66,6 +67,10 @@ describe Facter do
       expect(facts['yaml_fact4']).to be_a(Float)
       expect(facts['yaml_fact5']).to be_a(Array)
       expect(facts['yaml_fact6']).to be_a(Hash)
+      expect(facts['yaml_fact7']).to be_a(String)
+      expect(facts['not_bool']).to be_a(String)
+      expect(facts['not_int']).to be_a(String)
+      expect(facts['not_double']).to be_a(String)
       expect(facts['json_fact1']).to be_a(String)
       expect(facts['json_fact2']).to be_a(Integer)
       expect(facts['json_fact3']).to(satisfy { |v| v == true || v == false })
@@ -90,6 +95,22 @@ describe Facter do
     it 'should set external search paths' do
       Facter.search_external(['foo', 'bar', 'baz'])
       expect(Facter.search_external_path).to eq(['foo', 'bar', 'baz'])
+    end
+
+    it 'should find encoded search paths' do
+      snowman_path = File.expand_path('../../../lib/tests/fixtures/facts/external/zö', File.dirname(__FILE__))
+      encoded_path = snowman_path.encode("Windows-1252")
+      Facter.search(encoded_path)
+      expect(Facter.search_path).to eq([snowman_path])
+      expect(Facter.value('snowman_fact')).to eq('olaf')
+    end
+
+    it 'should find encoded external search paths' do
+      snowman_path = File.expand_path('../../../lib/tests/fixtures/facts/external/zö', File.dirname(__FILE__))
+      encoded_path = snowman_path.encode("Windows-1252")
+      Facter.search_external([encoded_path])
+      expect(Facter.search_external_path).to eq([snowman_path])
+      expect(Facter.value('snowman_fact')).to eq('olaf')
     end
 
     it 'should support stubbing for confine testing' do

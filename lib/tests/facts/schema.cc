@@ -42,6 +42,7 @@ using namespace std;
 using namespace facter::facts;
 using namespace leatherman::util;
 using namespace facter::testing;
+using Catch::Matchers::AnyOf;
 
 // For every base resolver, implement a resolver that outputs the minimum values to pass schema validation
 // We don't care about the actual data in the facts, only that it conforms to the schema
@@ -138,6 +139,7 @@ struct identity_resolver : resolvers::identity_resolver
         result.group_name = "group";
         result.user_id = 456;
         result.user_name = "user";
+        result.privileged = false;
         return result;
     }
 };
@@ -426,6 +428,7 @@ void add_all_facts(collection& facts)
 {
     facts.add("env_windows_installdir", make_value<string_value>("C:\\Program Files\\Some\\Path"));
     facts.add("facterversion", make_value<string_value>("version"));
+    facts.add("aio_agent_version", make_value<string_value>(""));
     facts.add(make_shared<augeas_resolver>());
     facts.add(make_shared<disk_resolver>());
     facts.add(make_shared<dmi_resolver>());

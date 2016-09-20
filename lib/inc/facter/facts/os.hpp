@@ -185,6 +185,14 @@ namespace facter { namespace facts {
          * The AristaEOS operating system.
          */
         constexpr static char const* arista_eos = "AristaEOS";
+       /**
+        * The HuaweiOS operating system.
+        */
+        constexpr static char const* huawei = "HuaweiOS";
+       /**
+        * The PhotonOS operating system.
+        */
+        constexpr static char const* photon_os = "PhotonOS";
     };
 
 }}

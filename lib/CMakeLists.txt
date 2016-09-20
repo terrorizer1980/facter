@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.2.2)
 
 set(LIBFACTER_VERSION_MAJOR 3)
-set(LIBFACTER_VERSION_MINOR 1)
+set(LIBFACTER_VERSION_MINOR 4)
 set(LIBFACTER_VERSION_PATCH 1)
 
 # Get the HEAD SHA1 commit message
@@ -11,6 +11,12 @@ get_commit_string(LIBFACTER_COMMIT)
 configure_file (
     "version.h.in"
     "${CMAKE_CURRENT_LIST_DIR}/inc/facter/version.h"
+)
+
+# Generate a .gemspec file based on the above version numbers
+configure_file (
+    "gemspec.in"
+    "${CMAKE_CURRENT_LIST_DIR}/../.gemspec"
 )
 
 # Set compiler-specific flags
@@ -66,6 +72,7 @@ set(LIBFACTER_COMMON_SOURCES
     "src/ruby/simple_resolution.cc"
     "src/util/scoped_file.cc"
     "src/util/string.cc"
+    "src/util/config/config.cc"
 )
 
 # Set the POSIX sources if on a POSIX platform
@@ -82,6 +89,7 @@ if (UNIX)
         "src/facts/posix/xen_resolver.cc"
         "src/util/posix/scoped_addrinfo.cc"
         "src/util/posix/scoped_descriptor.cc"
+        "src/util/config/posix/config.cc"
     )
     if (OPENSSL_FOUND)
         set(LIBFACTER_STANDARD_SOURCES ${LIBFACTER_STANDARD_SOURCES} "src/util/posix/scoped_bio.cc")
@@ -184,11 +192,13 @@ elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
     )
 elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "FreeBSD")
     set(LIBFACTER_PLATFORM_SOURCES
-        "src/facts/bsd/collection.cc"
+        "src/facts/freebsd/collection.cc"
         "src/facts/glib/load_average_resolver.cc"
         "src/facts/bsd/filesystem_resolver.cc"
         "src/facts/bsd/networking_resolver.cc"
         "src/facts/bsd/uptime_resolver.cc"
+        "src/facts/freebsd/processor_resolver.cc"
+        "src/facts/freebsd/dmi_resolver.cc"
         "src/util/bsd/scoped_ifaddrs.cc"
     )
 elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "OpenBSD")
@@ -196,6 +206,7 @@ elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "OpenBSD")
         "src/facts/openbsd/collection.cc"
         "src/facts/glib/load_average_resolver.cc"
         "src/facts/bsd/filesystem_resolver.cc"
+        "src/facts/bsd/networking_resolver.cc"
         "src/facts/bsd/uptime_resolver.cc"
         "src/facts/openbsd/dmi_resolver.cc"
         "src/facts/openbsd/networking_resolver.cc"
@@ -216,6 +227,7 @@ elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
         "src/facts/windows/timezone_resolver.cc"
         "src/facts/windows/uptime_resolver.cc"
         "src/facts/windows/virtualization_resolver.cc"
+        "src/util/config/windows/config.cc"
     )
 
     # The GetPerformanceInfo symbol has moved around a lot between Windows versions;
@@ -263,6 +275,7 @@ include_directories(
     ${YAMLCPP_INCLUDE_DIRS}
     ${CURL_INCLUDE_DIRS}
     ${LEATHERMAN_INCLUDE_DIRS}
+    ${CPPHOCON_INCLUDE_DIRS}
 )
 
 link_directories(
@@ -270,6 +283,7 @@ link_directories(
     ${OPENSSL_LIBRARY_DIRS}
     ${YAMLCPP_LIBRARY_DIRS}
     ${CURL_LIBRARY_DIRS}
+    ${CPPHOCON_LIBRARY_DIRS}
 )
 
 # Add the library target without a prefix (name already has the 'lib') and use '.so' for all platforms (Ruby extension file extension)
@@ -287,35 +301,24 @@ endif()
 
 # Link in additional libraries
 target_link_libraries(libfacter PRIVATE
+    ${CPPHOCON_LIBRARIES}
     ${LIBFACTER_PLATFORM_LIBRARIES}
     ${LEATHERMAN_LIBRARIES}
     ${Boost_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     ${YAMLCPP_LIBRARIES}
     ${CURL_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
 )
 
-# Generate the export header
-include(GenerateExportHeader)
-generate_export_header(libfacter EXPORT_FILE_NAME "${CMAKE_CURRENT_LIST_DIR}/inc/facter/export.h")
+symbol_exports(libfacter "${CMAKE_CURRENT_LIST_DIR}/inc/facter/export.h")
+target_compile_definitions(libfactersrc PRIVATE "-Dlibfacter_EXPORTS")
 
-if ("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
-    add_compiler_export_flags()
-elseif (WIN32)
-    add_compiler_export_flags()
-    add_definitions("-Dlibfacter_EXPORTS")
-endif()
-
-install(TARGETS libfacter DESTINATION ${LIBFACTER_INSTALL_DESTINATION})
+leatherman_install(libfacter)
 install(DIRECTORY inc/facter DESTINATION include)
 
-# Always generate facter.rb and spec_helper.rb, as they might be used in packaging
+# Always generate spec_helper.rb, as they might be used in packaging
 # and testing on another machine.
-configure_file (
-    "facter.rb.in"
-    "${CMAKE_BINARY_DIR}/lib/facter.rb"
-)
-
 # Generate a file for ruby testing
 configure_file (
     "spec_helper.rb.in"
@@ -345,6 +348,12 @@ else()
 endif()
 
 if(RUBY_VENDORDIR)
+    file(RELATIVE_PATH LIBFACTER_INSTALL_RELATIVE ${RUBY_VENDORDIR} ${CMAKE_INSTALL_PREFIX})
+    configure_file (
+        "facter.rb.in"
+        "${CMAKE_BINARY_DIR}/lib/facter.rb"
+    )
+
     message(STATUS "\"make install\" will install facter.rb to ${RUBY_VENDORDIR}")
     install(FILES ${CMAKE_BINARY_DIR}/lib/facter.rb DESTINATION ${RUBY_VENDORDIR})
 

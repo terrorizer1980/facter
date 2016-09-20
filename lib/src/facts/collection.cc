@@ -4,6 +4,7 @@
 #include <facter/facts/scalar_value.hpp>
 #include <facter/facts/array_value.hpp>
 #include <facter/facts/map_value.hpp>
+#include <facter/ruby/ruby.hpp>
 #include <leatherman/file_util/directory.hpp>
 #include <leatherman/util/environment.hpp>
 #include <facter/util/string.hpp>
@@ -14,6 +15,7 @@
 #include <internal/facts/resolvers/ec2_resolver.hpp>
 #include <internal/facts/resolvers/gce_resolver.hpp>
 #include <internal/facts/resolvers/augeas_resolver.hpp>
+#include <internal/ruby/ruby_value.hpp>
 #include <leatherman/logging/logging.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
@@ -123,9 +125,9 @@ namespace facter { namespace facts {
         // If dir is relative, make it an absolute path before passing to can_resolve.
         bool found = false;
         boost::system::error_code ec;
-        path search_dir = canonical(dir, ec);
+        path search_dir = absolute(dir);
 
-        if (ec || !is_directory(search_dir, ec)) {
+        if (!is_directory(search_dir, ec)) {
             // Warn the user if not using the default search directories
             string msg = ec ? ec.message() : "not a directory";
             if (warn) {
@@ -266,10 +268,10 @@ namespace facter { namespace facts {
 
     ostream& collection::write(ostream& stream, format fmt, set<string> const& queries)
     {
-        return write(stream, fmt, queries, false);
+        return write(stream, fmt, queries, false, false);
     }
 
-    ostream& collection::write(ostream& stream, format fmt, set<string> const& queries, bool show_legacy)
+    ostream& collection::write(ostream& stream, format fmt, set<string> const& queries, bool show_legacy, bool strict_errors)
     {
         if (queries.empty()) {
             // Resolve all facts
@@ -277,11 +279,11 @@ namespace facter { namespace facts {
         }
 
         if (fmt == format::hash) {
-            write_hash(stream, queries, show_legacy);
+            write_hash(stream, queries, show_legacy, strict_errors);
         } else if (fmt == format::json) {
-            write_json(stream, queries, show_legacy);
+            write_json(stream, queries, show_legacy, strict_errors);
         } else if (fmt == format::yaml) {
-            write_yaml(stream, queries, show_legacy);
+            write_yaml(stream, queries, show_legacy, strict_errors);
         }
         return stream;
     }
@@ -332,7 +334,7 @@ namespace facter { namespace facts {
         return it == _facts.end() ? nullptr : it->second.get();
     }
 
-    value const* collection::query_value(string const& query)
+    value const* collection::query_value(string const& query, bool strict_errors)
     {
         // First attempt to lookup a fact with the exact name of the query
         value const* current = get_value(query);
@@ -341,6 +343,7 @@ namespace facter { namespace facts {
         }
 
         bool in_quotes = false;
+        vector<string> segments;
         string segment;
         for (auto const& c : query) {
             if (c == '"') {
@@ -351,25 +354,46 @@ namespace facter { namespace facts {
                 segment += c;
                 continue;
             }
-            current = lookup(current, segment);
-            if (!current) {
-                return nullptr;
-            }
+            segments.emplace_back(move(segment));
             segment.clear();
         }
-
         if (!segment.empty()) {
-            current = lookup(current, segment);
+            segments.emplace_back(move(segment));
         }
+
+        auto segment_end = end(segments);
+        for (auto segment = begin(segments); segment != segment_end; ++segment) {
+            auto rb_val = dynamic_cast<ruby::ruby_value const *>(current);
+            if (rb_val) {
+                current = facter::ruby::lookup(current, segment, segment_end);
+                if (!current) {
+                    LOG_DEBUG("cannot lookup an element with \"%1%\" from Ruby fact", *segment);
+                }
+                // Once we hit Ruby there's no going back, so whatever we get from Ruby is the value.
+                return current;
+            } else {
+                current = lookup(current, *segment, strict_errors);
+            }
+            if (!current) {
+                // Break out early if there's no value for this segment
+                return nullptr;
+            }
+        }
+
         return current;
     }
 
-    value const* collection::lookup(value const* value, string const& name)
+    value const* collection::lookup(value const* value, string const& name, bool strict_errors)
     {
         if (!value) {
             value = get_value(name);
             if (!value) {
-                LOG_DEBUG("fact \"%1%\" does not exist.", name);
+                string message = "fact \"%1%\" does not exist.";
+                if (strict_errors) {
+                    LOG_ERROR(message, name);
+                } else {
+                    LOG_DEBUG(message, name);
+                }
             }
             return value;
         }
@@ -409,11 +433,11 @@ namespace facter { namespace facts {
         return nullptr;
     }
 
-    void collection::write_hash(ostream& stream, set<string> const& queries, bool show_legacy)
+    void collection::write_hash(ostream& stream, set<string> const& queries, bool show_legacy, bool strict_errors)
     {
         // If there's only one query, print the result without the name
         if (queries.size() == 1u) {
-            auto value = query_value(*queries.begin());
+            auto value = query_value(*queries.begin(), strict_errors);
             if (value) {
                 value->write(stream, false);
             }
@@ -441,7 +465,7 @@ namespace facter { namespace facts {
             // Print queried facts
             vector<pair<string, value const*>> facts;
             for (auto const& query : queries) {
-                facts.push_back(make_pair(query, this->query_value(query)));
+                facts.push_back(make_pair(query, this->query_value(query, strict_errors)));
             }
 
             for (auto const& kvp : facts) {
@@ -475,7 +499,7 @@ namespace facter { namespace facts {
          ostream& _stream;
     };
 
-    void collection::write_json(ostream& stream, set<string> const& queries, bool show_legacy)
+    void collection::write_json(ostream& stream, set<string> const& queries, bool show_legacy, bool strict_errors)
     {
         json_document document;
         document.SetObject();
@@ -496,7 +520,7 @@ namespace facter { namespace facts {
 
         if (!queries.empty()) {
             for (auto const& query : queries) {
-                builder(query, this->query_value(query));
+                builder(query, this->query_value(query, strict_errors));
             }
         } else {
             for (auto const& kvp : _facts) {
@@ -510,7 +534,7 @@ namespace facter { namespace facts {
         document.Accept(writer);
     }
 
-    void collection::write_yaml(ostream& stream, set<string> const& queries, bool show_legacy)
+    void collection::write_yaml(ostream& stream, set<string> const& queries, bool show_legacy, bool strict_errors)
     {
         Emitter emitter(stream);
         emitter << BeginMap;
@@ -535,7 +559,7 @@ namespace facter { namespace facts {
         if (!queries.empty()) {
             vector<pair<string, value const*>> facts;
             for (auto const& query : queries) {
-                facts.push_back(make_pair(query, this->query_value(query)));
+                facts.push_back(make_pair(query, this->query_value(query, strict_errors)));
             }
 
             for (auto const& kvp : facts) {
@@ -552,6 +576,9 @@ namespace facter { namespace facts {
     void collection::add_common_facts(bool include_ruby_facts)
     {
         add("facterversion", make_value<string_value>(LIBFACTER_VERSION));
+#ifdef AIO_AGENT_VERSION
+        add("aio_agent_version", make_value<string_value>(AIO_AGENT_VERSION));
+#endif
 
         if (include_ruby_facts) {
             add(make_shared<resolvers::ruby_resolver>());

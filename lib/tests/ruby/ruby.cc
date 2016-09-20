@@ -271,11 +271,17 @@ SCENARIO("custom facts written in Ruby") {
         THEN("the value is an array") {
             REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "[\n  1,\n  true,\n  false,\n  \"foo\",\n  12.4,\n  [\n    1\n  ],\n  {\n    foo => \"bar\"\n  }\n]");
         }
+        THEN("the members of the fact can be queried") {
+            REQUIRE(ruby_value_to_string(facts.query<ruby_value>("foo.5.0")) == "1");
+        }
     }
     GIVEN("a fact that resolves to a hash value") {
         REQUIRE(load_custom_fact("hash_fact.rb", facts));
         THEN("the value is a hash") {
             REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "{\n  int => 1,\n  bool_true => true,\n  bool_false => false,\n  double => 12.34,\n  string => \"foo\",\n  array => [\n    1,\n    2,\n    3\n  ]\n}");
+        }
+        THEN("the members of the fact can be queried") {
+            REQUIRE(ruby_value_to_string(facts.query<ruby_value>("foo.array.1")) == "2");
         }
     }
     GIVEN("a fact that resolves using Facter.value") {
@@ -525,7 +531,7 @@ SCENARIO("custom facts written in Ruby") {
         log_capture capture(level::debug);
         REQUIRE(load_custom_fact("on_message.rb", facts));
         THEN("no messages are logged") {
-            REQUIRE(capture.result().empty());
+            REQUIRE_FALSE(re_search(capture.result(), boost::regex("debug message")));
         }
     }
     GIVEN("a custom fact with a higher weight than a built-in fact") {
@@ -611,6 +617,18 @@ SCENARIO("custom facts written in Ruby") {
         REQUIRE(load_custom_fact("negative_number.rb", facts));
         THEN("the value should be output as a signed value") {
             REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "-101");
+        }
+    }
+    GIVEN("a fact that returns the exit code of its command") {
+        REQUIRE(load_custom_fact("uses_exit_code.rb", facts));
+        THEN("the value should be the exit code") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("foo")) == "99");
+        }
+    }
+    GIVEN("a fact that returns a number larger than 32-bits") {
+        REQUIRE(load_custom_fact("bignum_fact_value.rb", facts));
+        THEN("the value should be output correctly") {
+            REQUIRE(ruby_value_to_string(facts.get<ruby_value>("bignum_fact")) == "12345678901");
         }
     }
 }

@@ -5,8 +5,10 @@ Gemfile.local
 Gemfile.lock
 /nbproject
 compile_commands.json
+.bundle
 
 # Generated files
+.gemspec
 /lib/inc/facter/export.h
 /lib/inc/facter/version.h
 /lib/tests/fixtures.hpp
@@ -14,6 +16,7 @@ compile_commands.json
 /lib/spec/spec_helper.rb
 /debug*/
 /*release*/
+/*build*/
 /.idea/
 /linux-release/
 

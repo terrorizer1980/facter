@@ -17,10 +17,7 @@ Build Requirements
 * CMake >= 3.2.2
 * Boost C++ Libraries >= 1.54
 * yaml-cpp >= 0.5.1
-
-Currently the leatherman library is vendored as a git submodule.  To ensure submodules are initialized, please run:
-
-**`git submodule update --init`**
+* [leatherman](https://github.com/puppetlabs/leatherman) >= 0.3.4
 
 Optional Build Libraries
 ------------------------
@@ -34,15 +31,13 @@ Initial Setup
 
 Note: Testing custom facts requires Ruby 1.9+ with libruby built as a dynamic library; that often implies development builds of Ruby.
 
-### Setup on Fedora 20
+### Setup on Fedora 23
 
 The following will install all required tools and libraries:
 
-    yum install boost-devel openssl-devel yaml-cpp-devel libblkid-devel libcurl-devel gcc-c++ make wget tar
-    wget http://www.cmake.org/files/v3.2/cmake-3.2.3-Linux-x86_64.tar.gz
-    tar xzvf cmake-3.2.3-Linux-x86_64.tar.gz --strip 1 -C /usr/local
+    dnf install boost-devel openssl-devel yaml-cpp-devel libblkid-devel libcurl-devel gcc-c++ make wget tar cmake
 
-### Setup on Mac OSX Mavericks (homebrew)
+### Setup on Mac OSX El Capitan (homebrew)
 
 This assumes Clang is installed and the system OpenSSL libraries will be used.
 
@@ -50,13 +45,17 @@ The following will install all required libraries:
 
     brew install cmake boost yaml-cpp
 
-### Setup on Ubuntu 14.04 (Trusty)
+### Setup on Ubuntu 15.10 (Trusty)
 
 The following will install most required tools and libraries:
 
-    apt-get install build-essential libboost-all-dev libssl-dev libyaml-cpp-dev libblkid-dev libcurl4-openssl-dev wget tar
-    wget http://www.cmake.org/files/v3.2/cmake-3.2.3-Linux-x86_64.tar.gz
-    tar xzvf cmake-3.2.3-Linux-x86_64.tar.gz --strip 1 -C /usr/local
+    apt-get install build-essential libboost-all-dev libssl-dev libyaml-cpp-dev libblkid-dev libcurl4-openssl-dev wget tar cmake
+
+### Setup on FreeBSD 10
+
+The following will install most required tools and libraries:
+
+    pkg install git ruby21 cmake boost-all yaml-cpp gcc49
 
 ### Setup on Windows
 
@@ -76,7 +75,7 @@ For the remaining tasks, build commands can be executed in the shell from Start 
         .\bootstrap mingw
         .\b2 toolset=gcc --build-type=minimal install --prefix=$install --with-program_options --with-system --with-filesystem --with-date_time --with-thread --with-regex --with-log --with-locale --with-chrono boost.locale.iconv=off
 
-* build [yaml-cpp](https://code.google.com/p/yaml-cpp/downloads)
+* build [yaml-cpp](https://github.com/jbeder/yaml-cpp)
 
         cmake -G "MinGW Makefiles" -DCMAKE_PREFIX_PATH=$install -DCMAKE_INSTALL_PREFIX=$install .
         mingw32-make install
@@ -90,6 +89,7 @@ For the remaining tasks, build commands can be executed in the shell from Start 
 In Powershell:
 
     choco install cmake 7zip.commandline -y
+    $env:PATH = "C:\Program Files\CMake\bin;$env:PATH"
     choco install mingw --params "/threads:win32" -y
     $env:PATH = "C:\tools\mingw64\bin;$env:PATH"
     $install = "C:\tools"
@@ -101,10 +101,10 @@ In Powershell:
     .\b2 toolset=gcc --build-type=minimal install --prefix=$install --with-program_options --with-system --with-filesystem --with-date_time --with-thread --with-regex --with-log --with-locale --with-chrono boost.locale.iconv=off
     popd
 
-    (New-Object Net.WebClient).DownloadFile("https://yaml-cpp.googlecode.com/files/yaml-cpp-0.5.1.tar.gz", "$pwd/yaml-cpp-0.5.1.tar.gz")
-    7za x yaml-cpp-0.5.1.tar.gz
-    7za x yaml-cpp-0.5.1.tar
-    pushd yaml-cpp-0.5.1
+    (New-Object Net.WebClient).DownloadFile("https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-0.5.3.tar.gz", "$pwd/yaml-cpp-0.5.3.tar.gz")
+    7za x yaml-cpp-0.5.3.tar.gz
+    7za x yaml-cpp-0.5.3.tar
+    pushd yaml-cpp-yaml-cpp-0.5.3
     cmake -G "MinGW Makefiles" -DCMAKE_PREFIX_PATH="$install" -DCMAKE_INSTALL_PREFIX="$install" .
     mingw32-make install
     popd
@@ -119,6 +119,18 @@ In Powershell:
 
 Note that OpenSSL isn't needed on Windows.
 
+### Setup on OpenBSD 6.0
+
+The following will install all required tools and libraries:
+
+	pkg_add boost cmake curl g++ ruby yaml-cpp
+
+Optionally `leatherman` can be installed from packages too if not
+built locally.
+
+### Build and install Leatherman
+
+[Leatherman](https://github.com/puppetlabs/leatherman) is built similar to the Pre-Build instructions below. If building on Windows, install to the same `$install` location used for other dependencies.
 
 Pre-Build
 ---------
@@ -211,10 +223,34 @@ Using the Ruby API requires that facter.rb is installed into the Ruby load path,
 
 ```ruby
     require 'facter'
-    
+
     # Use the Facter API...
     puts "kernel: #{Facter.value(:kernel)}"
 ```
+
+Configuration
+-------------
+
+Facter can be configured via a HOCON config file of the following format:
+
+```
+global : {
+    external-dir     : [ "path1", "path2" ],
+    custom-dir       : [ "custom/path" ],
+    no-exernal-facts : false,
+    no-custom-facts  : false,
+    no-ruby          : false
+}
+cli : {
+    debug     : false,
+    trace     : true,
+    verbose   : false,
+    log-level : "warn"
+}
+```
+All options are respected when running Facter standalone, while calling Facter from Ruby will only load `external-dir` and `custom-dir`.
+
+The file will be loaded by default from `/etc/puppetlabs/facter/facter.conf` on Unix and `C:\ProgramData\PuppetLabs\facter\facter.conf` on Windows. A different location can be specified using the `--config` command line option.
 
 Uninstall
 ---------

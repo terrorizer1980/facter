@@ -46,6 +46,10 @@ namespace facter { namespace facts { namespace linux {
     {
         // Check for Debian variants
         bs::error_code ec;
+        if (is_regular_file(release_file::huawei, ec)) {
+          return os::huawei;
+        }
+
         if (is_regular_file(release_file::debian, ec)) {
             if (distro_id == os::ubuntu || distro_id == os::linux_mint) {
                 return distro_id;
@@ -91,6 +95,16 @@ namespace facter { namespace facts { namespace linux {
                 }
             }
             return os::redhat;
+        }
+        return {};
+    }
+
+    static string check_photon_linux()
+    {
+        string contents = lth_file::read(release_file::lsb);
+        boost::trim(contents);
+        if (re_search(contents, boost::regex("VMware Photon"))) {
+            return string(os::photon_os);
         }
         return {};
     }
@@ -186,6 +200,10 @@ namespace facter { namespace facts { namespace linux {
             return value;
         }
 
+        value = check_photon_linux();
+        if (!value.empty()) {
+            return value;
+        }
         // This should happen after everything else because it's a relatively broad match
         return check_amazon();
     }
@@ -206,6 +224,8 @@ namespace facter { namespace facts { namespace linux {
             { string(os::oracle_enterprise_linux),  string(os_family::redhat) },
             { string(os::amazon),                   string(os_family::redhat) },
             { string(os::xen_server),               string(os_family::redhat) },
+            { string(os::photon_os),                string(os_family::redhat) },
+            { string(os::huawei),                   string(os_family::debian) },
             { string(os::linux_mint),               string(os_family::debian) },
             { string(os::ubuntu),                   string(os_family::debian) },
             { string(os::debian),                   string(os_family::debian) },
@@ -276,6 +296,12 @@ namespace facter { namespace facts { namespace linux {
             boost::trim_right(value);
         }
 
+        // HuaweiOS uses the entire contents of the release file as the version
+        if (value.empty() && name == os::huawei) {
+            value = lth_file::read(release_file::huawei);
+            boost::trim_right(value);
+        }
+
         // Check for SuSE related distros, read the release file
         if (value.empty() && (
                 name == os::suse ||
@@ -295,6 +321,14 @@ namespace facter { namespace facts { namespace linux {
                 value = major + "." + minor;
             } else {
                 value = "unknown";
+            }
+        }
+        if (value.empty() && name == os::photon_os) {
+            string major, minor;
+            string contents = lth_file::read(release_file::lsb);
+            string pattern = "DISTRIB_RELEASE=\"(\\d+)\\.(\\d+)( ([a-zA-Z]+\\d+))?\"";
+            if (re_search(contents, boost::regex(pattern), &major, &minor)) {
+                value = major + "." + minor;
             }
         }
 

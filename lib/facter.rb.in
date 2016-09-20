@@ -27,14 +27,17 @@ module Facter
   else
     # Simply require libfacter.so; this will define all of the Facter API
     begin
-      # This is a cmake pre-processor check.  On *nix it will end up '' == '1'
+      facter_dir = ENV['FACTERDIR'] || File.join(File.expand_path("#{File.dirname(__FILE__)}"), '${LIBFACTER_INSTALL_RELATIVE}')
+      #
+      # This is a cmake pre-processor check. On *nix it will end up '' == '1'
       # On windows, where we want the changes it will be '1' == '1'
+      #
+      # Facter requires the extra inclusion of puppet/bin as the libfacter.so
+      # lib requires libraries and executables from that directory
       if '${WIN32}' == '1'
-        facter_root = File.expand_path("#{File.dirname(__FILE__)}/..")
-        ENV['PATH'] = "#{File.join(facter_root, 'bin')}#{File::PATH_SEPARATOR}#{ENV['PATH']}"
-        ENV['FACTERDIR'] ||= facter_root
+        ENV['PATH'] = "#{File.join(facter_dir, 'bin')}#{File::PATH_SEPARATOR}#{File.join(facter_dir, '../puppet/bin')}#{File::PATH_SEPARATOR}#{ENV['PATH']}"
       end
-      require "#{ENV['FACTERDIR'] || '${CMAKE_INSTALL_PREFIX}'}/${LIBFACTER_INSTALL_DESTINATION}/libfacter.so"
+      require "#{facter_dir}/${LIBFACTER_INSTALL_DESTINATION}/libfacter.so"
     rescue LoadError
       raise LoadError.new('libfacter was not found. Please make sure it was installed to the expected location.')
     end
