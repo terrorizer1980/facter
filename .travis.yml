@@ -19,6 +19,14 @@ addons:
       - libboost-locale1.55-dev
       - libboost-chrono1.55-dev
       - libblkid1
+  coverity_scan:
+    project:
+      name: "puppetlabs/facter"
+      description: "Build submitted via Travis CI"
+    notification_email: michael.smith@puppetlabs.com
+    build_command_prepend: "$USERDIR/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$USERDIR .; make clean"
+    build_command: "make"
+    branch_pattern: coverity_scan
 
 before_install:
   # Use a predefined install location; cppcheck requires the cfg location is defined at compile-time.
@@ -47,13 +55,3 @@ env:
     - LD_LIBRARY_PATH=$USERDIR/lib:$LD_LIBRARY_PATH
     - LEATHERMAN_VERSION=0.8.1
     - CPPHOCON_VERSION=0.1.2
-
-addons:
-  coverity_scan:
-    project:
-      name: "puppetlabs/facter"
-      description: "Build submitted via Travis CI"
-    notification_email: michael.smith@puppetlabs.com
-    build_command_prepend: "$USERDIR/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$USERDIR .; make clean"
-    build_command: "make"
-    branch_pattern: coverity_scan
