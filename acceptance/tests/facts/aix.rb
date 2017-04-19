@@ -1,4 +1,4 @@
-test_name "Facts should resolve as expected in AIX 5.3, 6.1, and 7.1"
+test_name "Facts should resolve as expected in AIX 5.3, 6.1, 7.1 and 7.2"
 
 #
 # This test is intended to ensure that facts specific to an OS configuration
@@ -20,6 +20,9 @@ agents.each do |agent|
   when /aix-7.1/
     kernel_release = /^7100-\d+-\d+-\d+/
     kernel_major_version = '7100'
+  when /aix-7.2/
+    kernel_release = /^7200-\d+-\d+-\d+/
+    kernel_major_version = '7200'
   end
 
   os_arch     = /[Pp]ower[Pp][Cc]/
@@ -49,34 +52,6 @@ agents.each do |agent|
                         }
 
   expected_processors.each do |fact, value|
-    assert_match(value, fact_on(agent, fact))
-  end
-
-  step "Ensure the Networking fact resolves with reasonable values for at least one interface"
-
-  expected_networking = {
-                          "networking.ip"       => /10\.\d+\.\d+\.\d+/,
-                          "networking.mac"      => /[a-f0-9]{2}:/,
-                          "networking.mtu"      => /\d+/,
-                          "networking.netmask"  => /\d+\.\d+\.\d+\.\d+/,
-                          "networking.network"  => /10\.\d+\.\d+\.\d+/,
-                        }
-
-  expected_networking.each do |fact, value|
-    assert_match(value, fact_on(agent, fact))
-  end
-
-  step "Ensure a primary networking interface was determined."
-  primary_interface = fact_on(agent, 'networking.primary')
-  refute_empty(primary_interface)
-
-  step "Ensure bindings for the primary networking interface are present."
-  expected_bindings = {
-                        "networking.interfaces.#{primary_interface}.bindings.0.address" => /\d+\.\d+\.\d+\.\d+/,
-                        "networking.interfaces.#{primary_interface}.bindings.0.netmask" => /\d+\.\d+\.\d+\.\d+/,
-                        "networking.interfaces.#{primary_interface}.bindings.0.network" => /\d+\.\d+\.\d+\.\d+/,
-                      }
-  expected_bindings.each do |fact, value|
     assert_match(value, fact_on(agent, fact))
   end
 

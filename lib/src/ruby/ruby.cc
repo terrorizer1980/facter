@@ -4,6 +4,9 @@
 #include <internal/ruby/ruby_value.hpp>
 #include <leatherman/ruby/api.hpp>
 #include <leatherman/logging/logging.hpp>
+#ifdef _WIN32
+#include <internal/util/windows/wsa.hpp>
+#endif
 
 #include <numeric>
 
@@ -39,7 +42,7 @@ namespace facter { namespace ruby {
             ruby.initialize();
             ruby.include_stack_trace(include_stack_trace);
         } catch (runtime_error& ex) {
-            LOG_WARNING("%1%: facts requiring Ruby will not be resolved.", ex.what());
+            LOG_WARNING("{1}: facts requiring Ruby will not be resolved.", ex.what());
             return false;
         }
         return true;
@@ -47,13 +50,20 @@ namespace facter { namespace ruby {
 
     void load_custom_facts(collection& facts, bool initialize_puppet, vector<string> const& paths)
     {
+#ifdef _WIN32
+        // Initialize WSA before resolving custom facts. The Ruby runtime does this only when running
+        // in a Ruby process, it leaves it up to us when embedding it. See
+        // https://github.com/ruby/ruby/blob/v2_1_9/ruby.c#L2011-L2022 for comments.
+        // The only piece we seem to need out of rb_w32_sysinit is WSAStartup.
+        util::windows::wsa winsocket;
+#endif
         api& ruby = api::instance();
         module mod(facts, {}, !initialize_puppet);
         if (initialize_puppet) {
             try {
                 ruby.eval(load_puppet);
             } catch (exception& ex) {
-                log(facter::logging::level::warning, "Could not load puppet; some facts may be unavailable: %1%", ex.what());
+                log(facter::logging::level::warning, "Could not load puppet; some facts may be unavailable: {1}", ex.what());
             }
         }
         mod.search(paths);
@@ -93,21 +103,21 @@ namespace facter { namespace ruby {
                 try {
                     index = stol(*segment);
                 } catch (logic_error&) {
-                    LOG_DEBUG("cannot lookup an array element with \"%1%\": expected an integral value.", *segment);
+                    LOG_DEBUG("cannot lookup an array element with \"{1}\": expected an integral value.", *segment);
                     return nullptr;
                 }
                 if (index < 0) {
-                    LOG_DEBUG("cannot lookup an array element with \"%1%\": expected a non-negative value.", *segment);
+                    LOG_DEBUG("cannot lookup an array element with \"{1}\": expected a non-negative value.", *segment);
                     return nullptr;
                 }
                 long length = ruby.array_len(val);
                 if (0 == length) {
-                    LOG_DEBUG("cannot lookup an array element with \"%1%\": the array is empty.", *segment);
+                    LOG_DEBUG("cannot lookup an array element with \"{1}\": the array is empty.", *segment);
                     return nullptr;
                 }
 
                 if (index >= length) {
-                    LOG_DEBUG("cannot lookup an array element with \"%1%\": expected an integral value between 0 and %2% (inclusive).", *segment, length - 1);
+                    LOG_DEBUG("cannot lookup an array element with \"{1}\": expected an integral value between 0 and {2} (inclusive).", *segment, length - 1);
                     return nullptr;
                 }
 
@@ -123,7 +133,7 @@ namespace facter { namespace ruby {
                 }
                 val = result;
             } else {
-                LOG_DEBUG("cannot lookup element \"%1%\": container is not an array or hash", *segment);
+                LOG_DEBUG("cannot lookup element \"{1}\": container is not an array or hash", *segment);
             }
             if (ruby.is_nil(val)) {
                 return nullptr;

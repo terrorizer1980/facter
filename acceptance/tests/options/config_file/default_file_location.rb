@@ -2,7 +2,9 @@
 # saved at the default location without any special command line flags.
 # On Unix, this location is /etc/puppetlabs/facter/facter.conf.
 # On Windows, it is C:\ProgramData\PuppetLabs\facter\etc\facter.conf
-test_name "config file is loaded from default location" do
+test_name "C99991: config file is loaded from default location" do
+  tag 'risk:high'
+
   config = <<EOM
 cli : {
     debug : true
@@ -22,12 +24,12 @@ EOM
       create_remote_file(agent, config_file, config)
 
       teardown do
-        on(agent, "rm -f '#{config_file}'")
+        on(agent, "rm -rf '#{config_dir}'", :acceptable_exit_codes => [0,1])
       end
 
       step "config file should be loaded automatically and turn DEBUG output on" do
-        on(agent, facter("")) do 
-          assert_match(/DEBUG/, stderr, "Expected DEBUG information in stderr")
+        on(agent, facter("")) do |facter_output|
+          assert_match(/DEBUG/, facter_output.stderr, "Expected DEBUG information in stderr")
         end
       end
     end
