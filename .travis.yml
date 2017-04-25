@@ -24,7 +24,7 @@ addons:
       name: "puppetlabs/facter"
       description: "Build submitted via Travis CI"
     notification_email: michael.smith@puppetlabs.com
-    build_command_prepend: "CC=gcc-4.8 CXX=g++-4.8 $USERDIR/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$USERDIR ."
+    build_command_prepend: "$USERDIR/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=$USERDIR -DLEATHERMAN_GETTEXT=OFF .; make clean"
     build_command: "make"
     branch_pattern: coverity_scan
 
@@ -41,6 +41,7 @@ before_install:
   - tar xzvf leatherman.tar.gz -C $USERDIR
   - wget https://github.com/puppetlabs/cpp-hocon/releases/download/${CPPHOCON_VERSION}/cpp-hocon.tar.gz
   - tar xzvf cpp-hocon.tar.gz -C $USERDIR
+  - export CC=gcc-4.8 CXX=g++-4.8
 
 script: if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then ./scripts/travis_target.sh ; fi
 
