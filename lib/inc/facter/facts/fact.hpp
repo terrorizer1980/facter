@@ -440,10 +440,13 @@ namespace facter { namespace facts {
          */
         constexpr static char const* is_virtual = "is_virtual";
         /**
+         * The fact for all detected hypervisors
+         */
+        constexpr static char const* hypervisors = "hypervisors";
+        /**
          * The fact for the cloud info, including provider, for a node.
          */
         constexpr static char const* cloud = "cloud";
-
         /**
          * The structured fact for identity information.
          */
@@ -528,9 +531,9 @@ namespace facter { namespace facts {
         constexpr static char const* zfs_version = "zfs_version";
 
         /**
-         * The ZFS supported feature numbers.
+         * The ZFS supported version numbers.
          */
-        constexpr static char const* zfs_featurenumbers = "zfs_featurenumbers";
+        constexpr static char const* zfs_versionnumbers = "zfs_featurenumbers";
 
         /**
          * The ZFS storage pool (zpool) version fact.
@@ -538,9 +541,14 @@ namespace facter { namespace facts {
         constexpr static char const* zpool_version = "zpool_version";
 
         /**
-         * The ZFS storage pool supported feature numbers.
+         * The ZFS storage pool supported feature flags.
          */
-        constexpr static char const* zpool_featurenumbers = "zpool_featurenumbers";
+        constexpr static char const* zpool_featureflags = "zpool_featureflags";
+
+        /**
+         * The ZFS storage pool supported version numbers.
+         */
+        constexpr static char const* zpool_versionnumbers = "zpool_featurenumbers";
 
         /**
          * The fact for number of Solaris zones.

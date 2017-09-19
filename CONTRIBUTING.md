@@ -82,7 +82,7 @@ a ticket number.
 
 ## Submitting Changes
 
-* Sign the [Contributor License Agreement](http://links.puppetlabs.com/cla).
+* Sign the [Contributor License Agreement](http://links.puppet.com/cla).
 * Push your changes to a topic branch in your fork of the repository.
 * Submit a pull request to the repository in the puppetlabs organization.
 * Update your ticket to mark that you have submitted code and are ready for it to be reviewed.
@@ -90,9 +90,10 @@ a ticket number.
 
 # Additional Resources
 
-* [More information on contributing](http://links.puppetlabs.com/contribute-to-puppet)
+* [Puppet community guidelines](https://docs.puppet.com/community/community_guidelines.html)
 * [Bug tracker (Jira)](https://tickets.puppetlabs.com/browse/FACT)
-* [Contributor License Agreement](http://links.puppetlabs.com/cla)
+* [Contributor License Agreement](http://links.puppet.com/cla)
 * [General GitHub documentation](http://help.github.com/)
 * [GitHub pull request documentation](http://help.github.com/send-pull-requests/)
 * #puppet-dev IRC channel on freenode.org
+* [puppet-dev mailing list](https://groups.google.com/forum/#!forum/puppet-dev)

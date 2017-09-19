@@ -18,6 +18,7 @@
 #include <internal/facts/resolvers/ec2_resolver.hpp>
 #include <internal/facts/resolvers/filesystem_resolver.hpp>
 #include <internal/facts/resolvers/gce_resolver.hpp>
+#include <internal/facts/resolvers/hypervisors_resolver.hpp>
 #include <internal/facts/resolvers/identity_resolver.hpp>
 #include <internal/facts/resolvers/kernel_resolver.hpp>
 #include <internal/facts/resolvers/ldom_resolver.hpp>
@@ -135,6 +136,26 @@ struct filesystem_resolver : resolvers::filesystem_resolver
         p.backing_file = "/foo/bar";
         result.partitions.emplace_back(move(p));
         return result;
+    }
+};
+
+using hypervisor_data = std::unordered_map<std::string, std::unordered_map<std::string, boost::variant<std::string, bool, int>>>;
+
+struct hypervisors_resolver_test : resolvers::hypervisors_resolver_base
+{
+    virtual hypervisor_data collect_data(collection& facts)
+    {
+        hypervisor_data results;
+
+        unordered_map<std::string, boost::variant<std::string, bool, int>> metadata {
+            {"string_value", string{"string"}}, // boost assumes const char* values are bools when bool is among the variants
+            {"integer_value", 42},
+            {"boolean_value", true},
+        };
+
+        results.insert({"hypervisor_name", metadata});
+
+        return results;
     }
 };
 
@@ -396,7 +417,7 @@ protected:
     {
         data result;
         result.version = 1;
-        result.features = { "1", "2", "3" };
+        result.versions = { "1", "2", "3" };
         return result;
     }
 };
@@ -433,7 +454,8 @@ protected:
     {
         data result;
         result.version = 1;
-        result.features = { "1", "2", "3" };
+        result.versions = { "1", "2", "3" };
+        result.feature_flags = { "async_destroy", "lz4_compress", "enabled_txg" };
         return result;
     }
 };
@@ -450,6 +472,7 @@ void add_all_facts(collection& facts)
     // TODO: refactor the EC2 resolver to use the "collect_data" pattern
     facts.add(make_shared<ec2_resolver>());
     // TODO: refactor the GCE resolver to use the "collect_data" pattern
+    facts.add(make_shared<hypervisors_resolver_test>());
     facts.add(fact::gce, make_value<map_value>());
     facts.add(make_shared<identity_resolver>());
     facts.add(make_shared<kernel_resolver>());
@@ -681,6 +704,7 @@ void validate_fact(YAML::Node const& node, value const* fact_value, bool require
     }
 }
 
+// TestRail C62454
 SCENARIO("validating schema") {
     boost::nowide::ifstream stream(LIBFACTER_TESTS_DIRECTORY "/../schema/facter.yaml");
 

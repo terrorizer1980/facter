@@ -397,7 +397,7 @@ namespace facter { namespace ruby {
             return ruby.utf8_value(ptr->value());
         }
         if (auto ptr = dynamic_cast<integer_value const*>(val)) {
-            return ruby.rb_ll2inum(static_cast<SIGNED_VALUE>(ptr->value()));
+            return ruby.rb_ll2inum(static_cast<LONG_LONG>(ptr->value()));
         }
         if (auto ptr = dynamic_cast<boolean_value const*>(val)) {
             return ptr->value() ? ruby.true_value() : ruby.false_value();
@@ -866,7 +866,7 @@ namespace facter { namespace ruby {
             // Unfortunately we have to call to_sym rather than using ID2SYM, which is Ruby version dependent
             uint32_t timeout = 0;
             volatile VALUE timeout_option = ruby.rb_hash_lookup(argv[1], ruby.to_symbol("timeout"));
-            if (ruby.is_fixednum(timeout_option)) {
+            if (ruby.is_integer(timeout_option)) {
                 timeout = ruby.num2size_t(timeout_option);
             }
 

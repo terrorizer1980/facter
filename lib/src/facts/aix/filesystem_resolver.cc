@@ -49,9 +49,17 @@ namespace facter { namespace facts { namespace aix {
     {
         for (const auto& mount : mountctl()) {
             mountpoint m;
+            // AIX Version 5.3 does not define the MNT_AHAFS variable.
+            // Anything above aix 5.3 will have _AIXVERSION_610 defined.
+#ifndef _AIXVERSION_610
             if (mount.vmt_gfstype == MNT_PROCFS) {
                 continue;
             }
+#else
+            if (mount.vmt_gfstype == MNT_PROCFS || mount.vmt_gfstype == MNT_AHAFS) {
+                continue;
+            }
+#endif
             m.filesystem = _filesystems[mount.vmt_gfstype];
             m.device = reinterpret_cast<char*>(vmt2dataptr(&mount, VMT_OBJECT));
             m.name = reinterpret_cast<char*>(vmt2dataptr(&mount, VMT_STUB));
@@ -89,11 +97,18 @@ namespace facter { namespace facts { namespace aix {
                     // AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDD.EEEE format
                     // First four chunks are hexadecimal 32-bit integers.
                     // After the dot is a decimal integer
-                    id.vg_id.word1 = stoul(string(at.value, 8), nullptr, 16);
-                    id.vg_id.word2 = stoul(string(at.value+8, 8), nullptr, 16);
-                    id.vg_id.word3 = stoul(string(at.value+16, 8), nullptr, 16);
-                    id.vg_id.word4 = stoul(string(at.value+24, 8), nullptr, 16);
-                    id.minor_num = stoul(string(at.value+33), nullptr, 10);
+                    // Volume groups from the 90s only have 64-bit IDs,
+                    // rather than the full 128.
+
+                    auto vgid = string(at.value);
+                    auto length = vgid.find_first_of('.');
+                    id.vg_id.word1 = stoul(vgid.substr(0, 8), nullptr, 16);
+                    id.vg_id.word2 = stoul(vgid.substr(8, 8), nullptr, 16);
+                    if (length == 32) {
+                        id.vg_id.word3 = stoul(vgid.substr(16, 8), nullptr, 16);
+                        id.vg_id.word4 = stoul(vgid.substr(24, 8), nullptr, 16);
+                    }
+                    id.minor_num = stoul(vgid.substr(length+1, string::npos), nullptr, 10);
 
                     struct querylv* lv;
                     if (0 != lvm_querylv(&id, &lv, nullptr)) {

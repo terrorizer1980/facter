@@ -21,6 +21,7 @@ leatherman_logging_namespace("puppetlabs.facter")
 
 # Set the common (platform-independent) sources
 set(LIBFACTER_COMMON_SOURCES
+    "src/cwrapper.cc"
     "src/facts/array_value.cc"
     "src/facts/collection.cc"
     "src/facts/external/execution_resolver.cc"
@@ -36,6 +37,7 @@ set(LIBFACTER_COMMON_SOURCES
     "src/facts/resolvers/ec2_resolver.cc"
     "src/facts/resolvers/filesystem_resolver.cc"
     "src/facts/resolvers/gce_resolver.cc"
+    "src/facts/resolvers/hypervisors_resolver.cc"
     "src/facts/resolvers/identity_resolver.cc"
     "src/facts/resolvers/kernel_resolver.cc"
     "src/facts/resolvers/ldom_resolver.cc"
@@ -203,6 +205,11 @@ elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "FreeBSD")
         "src/facts/freebsd/dmi_resolver.cc"
         "src/facts/freebsd/networking_resolver.cc"
         "src/util/bsd/scoped_ifaddrs.cc"
+        "src/facts/freebsd/zfs_resolver.cc"
+        "src/facts/freebsd/zpool_resolver.cc"
+        "src/facts/freebsd/virtualization_resolver.cc"
+        "src/facts/freebsd/memory_resolver.cc"
+        "src/facts/freebsd/operating_system_resolver.cc"
     )
 elseif ("${CMAKE_SYSTEM_NAME}" MATCHES "OpenBSD")
     set(LIBFACTER_PLATFORM_SOURCES
@@ -295,13 +302,16 @@ link_directories(
     ${YAMLCPP_LIBRARY_DIRS}
     ${CURL_LIBRARY_DIRS}
     ${CPPHOCON_LIBRARY_DIRS}
+    ${WHEREAMI_LIBRARY_DIRS}
 )
 
 # Add the library target without a prefix (name already has the 'lib') and use '.so' for all platforms (Ruby extension file extension)
 add_library(libfactersrc OBJECT ${LIBFACTER_COMMON_SOURCES} ${LIBFACTER_STANDARD_SOURCES} ${LIBFACTER_PLATFORM_SOURCES})
 set_target_properties(libfactersrc PROPERTIES POSITION_INDEPENDENT_CODE true)
-add_library(libfacter SHARED $<TARGET_OBJECTS:libfactersrc>)
-set_target_properties(libfacter PROPERTIES PREFIX "" SUFFIX ".so" IMPORT_PREFIX "" IMPORT_SUFFIX ".so.a" VERSION ${PROJECT_VERSION})
+add_library(libfacter $<TARGET_OBJECTS:libfactersrc>)
+if (BUILD_SHARED_LIBS)
+    set_target_properties(libfacter PROPERTIES PREFIX "" SUFFIX ".so" IMPORT_PREFIX "" IMPORT_SUFFIX ".so.a" VERSION ${PROJECT_VERSION})
+endif()
 
 if(AIX)
     # On AIX we need to be built such that we are "dynamically
@@ -310,7 +320,7 @@ if(AIX)
     set_target_properties(libfacter PROPERTIES LINK_FLAGS "-Wl,-G -eInit_libfacter")
 endif()
 
-set(LIBS ${CPPHOCON_LIBRARIES})
+set(LIBS ${CPPHOCON_LIBRARIES} ${WHEREAMI_LIBRARIES})
 
 # Static libraries should come before shared libraries, or you can end up
 # with some really annoying link errors. However, we can configure whether

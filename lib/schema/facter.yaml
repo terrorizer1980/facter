@@ -419,6 +419,14 @@ hostname:
         POSIX platforms: use the `gethostname` function to retrieve the host name
         Windows: use the `GetComputerNameExW` function to retrieve the host name.
 
+hypervisors:
+    type: map
+    description: |
+        Experimental fact: Return the names of any detected hypervisors and any collected metadata about them.
+    resolution: |
+        All platforms: Use the external `whereami` library to gather hypervisor data, if available.
+    validate: false
+
 id:
     type: string
     hidden: true
@@ -1893,6 +1901,14 @@ zones:
         Solaris: use the `zoneadm` utility to retrieve the count of Solaris zones.
     caveats: |
         Solaris: the `zoneadm` utility must be present.
+
+zpool_featureflags:
+    type: string
+    description: Return the comma-delimited feature flags for ZFS storage pools.
+    resolution: |
+        Solaris: use the `zpool` utility to retrieve the feature numbers for ZFS storage pools
+    caveats: |
+        Solaris: the `zpool` utility must be present.
 
 zpool_featurenumbers:
     type: string

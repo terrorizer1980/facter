@@ -83,6 +83,8 @@ namespace facter { namespace facts { namespace resolvers {
             make_tuple("oVirt Node",        string(vm::ovirt)),
             make_tuple("HVM domU",          string(vm::xen_hardware)),
             make_tuple("Bochs",             string(vm::bochs)),
+            make_tuple("OpenBSD",           string(vm::vmm)),
+            make_tuple("BHYVE",             string(vm::bhyve)),
         };
 
         for (auto const& vm : vms) {

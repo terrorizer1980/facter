@@ -7,6 +7,7 @@
 #include <facter/ruby/ruby.hpp>
 #include <facter/util/string.hpp>
 #include <facter/version.h>
+#include <internal/facts/resolvers/hypervisors_resolver.hpp>
 #include <internal/facts/resolvers/ruby_resolver.hpp>
 #include <internal/facts/resolvers/path_resolver.hpp>
 #include <internal/facts/resolvers/ec2_resolver.hpp>
@@ -35,7 +36,8 @@ using namespace leatherman::file_util;
 
 namespace facter { namespace facts {
 
-    collection::collection(set<string> const& blocklist, unordered_map<string, int64_t> const& ttls) : _blocklist(blocklist), _ttls(ttls)
+    collection::collection(set<string> const& blocklist, unordered_map<string, int64_t> const& ttls, bool ignore_cache) :
+        _blocklist(blocklist), _ttls(ttls), _ignore_cache(ignore_cache)
     {
         // This needs to be defined here since we use incomplete types in the header
     }
@@ -100,7 +102,11 @@ namespace facter { namespace facts {
                 } else {
                     ostringstream new_value_ss;
                     value->write(new_value_ss);
-                    LOG_DEBUG("fact \"{1}\" has changed from {2} to {3}.", name, old_value_ss.str(), new_value_ss.str());
+                    if (old_value->weight() > value->weight()) {
+                      LOG_DEBUG("new value for fact \"{1}\" ignored, because it's a lower weight", name);
+                    } else {
+                      LOG_DEBUG("fact \"{1}\" has changed from {2} to {3}.", name, old_value_ss.str(), new_value_ss.str());
+                    }
                 }
             } else {
                 if (!value) {
@@ -212,7 +218,9 @@ namespace facter { namespace facts {
             LOG_DEBUG("setting fact \"{1}\" based on the value of environment variable \"{2}\".", fact_name, name);
 
             // Add the value based on the environment variable
-            add(fact_name, make_value<string_value>(move(value)));
+            auto fact_value = make_value<string_value>(move(value));
+            fact_value->weight(external_fact_weight);
+            add(fact_name, move(fact_value));
             if (callback) {
                 callback(fact_name);
             }
@@ -349,18 +357,26 @@ namespace facter { namespace facts {
 
         // Check if the resolver should be cached
         auto resolver_ttl = _ttls.find(res->name());
-        if (resolver_ttl != _ttls.end()) {
+        if (!_ignore_cache && resolver_ttl != _ttls.end()) {
            cache::use_cache(*this, res, (*resolver_ttl).second);
            return;
         }
 
         // Resolve normally
         LOG_DEBUG("resolving {1} facts.", res->name());
-        res->resolve(*this);
+        try {
+            res->resolve(*this);
+        } catch (std::runtime_error &e) {
+            LOG_WARNING("exception resolving {1} facts, some facts will not be available: {2}", res->name(), e.what());
+        }
     }
 
     void collection::resolve_facts()
     {
+        // Delete any unused cache files
+        if (!_ignore_cache) {
+            cache::clean_cache(_ttls);
+        }
         // Remove the front of the resolvers list and resolve until no resolvers are left
         while (!_resolvers.empty()) {
             auto resolver = _resolvers.front();
@@ -632,6 +648,9 @@ namespace facter { namespace facts {
         add(make_shared<resolvers::ec2_resolver>());
         add(make_shared<resolvers::gce_resolver>());
         add(make_shared<resolvers::augeas_resolver>());
+#ifdef USE_WHEREAMI
+        add(make_shared<resolvers::hypervisors_resolver>());
+#endif
     }
 
 }}  // namespace facter::facts
